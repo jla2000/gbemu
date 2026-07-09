@@ -185,11 +185,11 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 ## Milestones / Feature breakdown
 
 ### M0 — Workspace scaffold
-- [ ] Cargo workspace with `gb-core` (lib) and `gb-tui` (bin) crates.
-- [ ] CLI arg parsing (`clap`): ROM path, `--headless`, palette flag.
-- [ ] Empty ratatui shell: init/teardown terminal (raw mode, alt screen),
+- [x] Cargo workspace with `gb-core` (lib) and `gb-tui` (bin) crates.
+- [x] CLI arg parsing (`clap`): ROM path, `--headless`, palette flag.
+- [x] Empty ratatui shell: init/teardown terminal (raw mode, alt screen),
       render loop skeleton, clean exit on Ctrl-C/Q.
-- [ ] `tracing` wired to in-memory ring buffer (log panel stub).
+- [x] `tracing` wired to in-memory ring buffer (log panel stub).
 
 ### M1 — CPU core
 - [ ] SM83 register set, flags, match-based opcode dispatch (base + CB).

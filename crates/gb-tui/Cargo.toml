@@ -1,0 +1,19 @@
+[package]
+name = "gb-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal frontend for gb-core: ratatui video, cpal audio, debugger"
+
+[[bin]]
+name = "gbemu"
+path = "src/main.rs"
+
+[dependencies]
+gb-core = { path = "../gb-core" }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
