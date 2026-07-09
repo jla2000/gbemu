@@ -193,7 +193,7 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 
 ### M1 — CPU core
 - [x] SM83 register set, flags, match-based opcode dispatch (base + CB).
-- [ ] MMU stub: flat 64KB addressable bus, enough to boot test ROMs.
+- [x] MMU stub: flat 64KB addressable bus, enough to boot test ROMs.
 - [ ] Interrupt handling (IE/IF, IME, dispatch priority), HALT/STOP + HALT
       bug.
 - [ ] Serial stub (SB/SC loopback) for test-output capture.
