@@ -192,7 +192,7 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 - [x] `tracing` wired to in-memory ring buffer (log panel stub).
 
 ### M1 — CPU core
-- [ ] SM83 register set, flags, match-based opcode dispatch (base + CB).
+- [x] SM83 register set, flags, match-based opcode dispatch (base + CB).
 - [ ] MMU stub: flat 64KB addressable bus, enough to boot test ROMs.
 - [ ] Interrupt handling (IE/IF, IME, dispatch priority), HALT/STOP + HALT
       bug.
