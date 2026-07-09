@@ -194,9 +194,9 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 ### M1 — CPU core
 - [x] SM83 register set, flags, match-based opcode dispatch (base + CB).
 - [x] MMU stub: flat 64KB addressable bus, enough to boot test ROMs.
-- [ ] Interrupt handling (IE/IF, IME, dispatch priority), HALT/STOP + HALT
+- [x] Interrupt handling (IE/IF, IME, dispatch priority), HALT/STOP + HALT
       bug.
-- [ ] Serial stub (SB/SC loopback) for test-output capture.
+- [x] Serial stub (SB/SC loopback) for test-output capture.
 - [ ] Blargg harness passes: `cpu_instrs`, `instr_timing`, `mem_timing`,
       `mem_timing-2`, `halt_bug`.
 
