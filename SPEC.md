@@ -197,8 +197,18 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 - [x] Interrupt handling (IE/IF, IME, dispatch priority), HALT/STOP + HALT
       bug.
 - [x] Serial stub (SB/SC loopback) for test-output capture.
-- [ ] Blargg harness passes: `cpu_instrs`, `instr_timing`, `mem_timing`,
-      `mem_timing-2`, `halt_bug`.
+- [x] Timer (DIV/TIMA/TMA/TAC) + timer interrupt — pulled forward from M4:
+      `instr_timing`/`mem_timing`(-2) self-time instructions via a
+      genuinely-running `TIMA`, so the M1 CPU core can't be verified
+      against them without it. Wired onto the MMU bus (see `mmu/mod.rs`
+      doc comment), not a separate `System` field, matching how `Serial`
+      already lives there.
+- [x] Blargg harness passes: `instr_timing`.
+- Deferred (found to need later milestones, not just M1 — see below):
+  `cpu_instrs`, `mem_timing`, `mem_timing-2` need M3 MBC1 bank switching
+  (64KB multi-test builds); `halt_bug` needs M2 PPU (`LY`/VBlank polling
+  in Blargg's shell console). Each is `#[ignore]`d with that reason in
+  `tests/blargg/tests/` until its milestone lands.
 
 ### M2 — PPU
 - [ ] LCDC/STAT/SCX/SCY/WX/WY/BGP/OBP0/OBP1 registers.
@@ -207,15 +217,19 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       OBJ-OBJ priority (X-coord + OAM index).
 - [ ] Half-block video widget in `gb-tui`, truecolor palette.
 - [ ] Passes `dmg-acid2` and Mealybug Tearoom suite.
+- [ ] Blargg harness passes: `halt_bug` (needs `LY`/VBlank polling — see M1).
 
 ### M3 — Cartridges
 - [ ] ROM header parsing + validation warnings.
 - [ ] MBC0, MBC1 (+ banking mode quirk), MBC2 (nibble RAM), MBC3 (+RTC
       latch), MBC5.
 - [ ] Battery-backed `.sav` load/persist (write on exit + dirty interval).
+- [ ] Blargg harness passes: `cpu_instrs`, `mem_timing`, `mem_timing-2`
+      (need MBC1 ROM bank switching — see M1).
 
 ### M4 — End-to-end playable
-- [ ] Timer (DIV/TIMA/TMA/TAC) wired to interrupts.
+- [x] Timer (DIV/TIMA/TMA/TAC) wired to interrupts — done in M1, pulled
+      forward (see above).
 - [ ] Joypad register + keyboard input mapping.
 - [ ] OAM DMA + general DMA timing.
 - [ ] `oam_bug` Blargg test passes.

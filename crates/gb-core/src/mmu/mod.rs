@@ -8,31 +8,40 @@
 //! HRAM regions, PPU/APU/Timer/Joypad register side effects — lands
 //! incrementally in M2/M3/M4/M5.
 //!
-//! `SB`/`SC` (0xFF01/0xFF02) are the exception: routed to a real [`Serial`]
-//! now (M1's "serial stub for test-output capture" task), since the
-//! Blargg harness needs it and I/O-mapped components naturally live behind
-//! the bus that owns their address range — the MMU, not `System`, is where
-//! this and later PPU/APU/Timer/Joypad register wiring belong. `IF`
-//! (0xFF0F) is likewise real: interrupt dispatch and the serial-complete
-//! request both need a live IF byte, and it's just flat memory until other
-//! interrupt sources (Timer/PPU/Joypad) land.
+//! `SB`/`SC` (0xFF01/0xFF02) and `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07)
+//! are the exceptions: routed to a real [`Serial`] and [`Timer`]
+//! respectively, since the Blargg harness needs serial output capture and
+//! `instr_timing`/`mem_timing`(-2) self-time via a genuinely-running `TIMA`
+//! (pulled forward from M4 — see `SPEC.md`). I/O-mapped components
+//! naturally live behind the bus that owns their address range — the MMU,
+//! not `System`, is where this and later PPU/APU/Joypad register wiring
+//! belong. `IF` (0xFF0F) is likewise real: interrupt dispatch, the
+//! serial-complete request, and the timer-overflow request all need a live
+//! IF byte, and it's just flat memory until other interrupt sources
+//! (PPU/Joypad) land.
 //!
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
 use crate::cpu::{Bus, IF_ADDR};
 use crate::serial::{Serial, SERIAL_INT_BIT};
+use crate::timer::{Timer, TIMER_INT_BIT};
 
 const SB_ADDR: u16 = 0xFF01;
 const SC_ADDR: u16 = 0xFF02;
+const DIV_ADDR: u16 = 0xFF04;
+const TIMA_ADDR: u16 = 0xFF05;
+const TMA_ADDR: u16 = 0xFF06;
+const TAC_ADDR: u16 = 0xFF07;
 
-/// Flat 64KB-addressable memory, plus the real serial port. Every other
-/// address hits the same backing array for every address — no banking, no
-/// region-specific behavior. Replaced by a real memory map as cartridge/
-/// PPU/APU/Timer/Joypad land.
+/// Flat 64KB-addressable memory, plus the real serial port and timer.
+/// Every other address hits the same backing array for every address — no
+/// banking, no region-specific behavior. Replaced by a real memory map as
+/// cartridge/PPU/APU/Joypad land.
 #[derive(Clone)]
 pub struct Mmu {
     mem: [u8; 0x10000],
     pub serial: Serial,
+    pub timer: Timer,
 }
 
 impl std::fmt::Debug for Mmu {
@@ -40,6 +49,7 @@ impl std::fmt::Debug for Mmu {
         f.debug_struct("Mmu")
             .field("mem", &"[u8; 65536]")
             .field("serial", &self.serial)
+            .field("timer", &self.timer)
             .finish()
     }
 }
@@ -49,6 +59,7 @@ impl Default for Mmu {
         Self {
             mem: [0; 0x10000],
             serial: Serial::new(),
+            timer: Timer::new(),
         }
     }
 }
@@ -66,6 +77,16 @@ impl Mmu {
         let len = data.len().min(self.mem.len());
         self.mem[..len].copy_from_slice(&data[..len]);
     }
+
+    /// Advances the timer by `t_cycles` T-cycles and folds a resulting
+    /// overflow into `IF`. Called from `System::step` once per CPU
+    /// instruction with its elapsed cycle count.
+    pub fn step_timer(&mut self, t_cycles: u8) {
+        self.timer.step(t_cycles);
+        if self.timer.take_interrupt() {
+            self.mem[IF_ADDR as usize] |= TIMER_INT_BIT;
+        }
+    }
 }
 
 impl Bus for Mmu {
@@ -73,6 +94,10 @@ impl Bus for Mmu {
         match addr {
             SB_ADDR => self.serial.read_sb(),
             SC_ADDR => self.serial.read_sc(),
+            DIV_ADDR => self.timer.read_div(),
+            TIMA_ADDR => self.timer.read_tima(),
+            TMA_ADDR => self.timer.read_tma(),
+            TAC_ADDR => self.timer.read_tac(),
             _ => self.mem[addr as usize],
         }
     }
@@ -86,6 +111,10 @@ impl Bus for Mmu {
                     self.mem[IF_ADDR as usize] |= SERIAL_INT_BIT;
                 }
             }
+            DIV_ADDR => self.timer.write_div(val),
+            TIMA_ADDR => self.timer.write_tima(val),
+            TMA_ADDR => self.timer.write_tma(val),
+            TAC_ADDR => self.timer.write_tac(val),
             _ => self.mem[addr as usize] = val,
         }
     }
