@@ -1,8 +1,13 @@
 //! Ties CPU/PPU/APU/MMU/Timer/Joypad/Serial together and drives execution.
 //!
-//! `step()` now runs the CPU against the MMU's flat 64KB bus (M1). PPU/APU/
-//! Timer stepping by elapsed T-cycles, and `run_frame()`'s VBlank-driven
-//! loop, land in M2 onward as those components stop being placeholders.
+//! `step()` runs the CPU against the MMU's flat 64KB bus (M1), including
+//! interrupt dispatch and the serial port's loopback output capture. The
+//! serial port lives on the MMU (`system.mmu.serial`), not as a separate
+//! `System` field — it's an I/O-mapped register block (`SB`/`SC`) owned by
+//! whatever owns the address space, same as PPU/APU/Timer/Joypad registers
+//! will be once those land. PPU/APU/Timer stepping by elapsed T-cycles, and
+//! `run_frame()`'s VBlank-driven loop, land in M2 onward as those
+//! components stop being placeholders.
 
 use crate::apu::Apu;
 use crate::cartridge::Cartridge;
@@ -10,7 +15,6 @@ use crate::cpu::Cpu;
 use crate::joypad::Joypad;
 use crate::mmu::Mmu;
 use crate::ppu::Ppu;
-use crate::serial::Serial;
 use crate::timer::Timer;
 
 /// Top-level emulated system.
@@ -22,7 +26,6 @@ pub struct System {
     pub mmu: Mmu,
     pub timer: Timer,
     pub joypad: Joypad,
-    pub serial: Serial,
     pub cartridge: Option<Cartridge>,
 }
 
@@ -35,7 +38,6 @@ impl System {
             mmu: Mmu::new(),
             timer: Timer::new(),
             joypad: Joypad::new(),
-            serial: Serial::new(),
             cartridge: None,
         }
     }
@@ -47,8 +49,9 @@ impl System {
         self.mmu.load_rom(data);
     }
 
-    /// Execute a single CPU instruction and advance other components by the
-    /// elapsed T-cycles. Returns the elapsed T-cycles.
+    /// Execute a single CPU instruction — including interrupt dispatch —
+    /// and advance other components by the elapsed T-cycles. Returns the
+    /// elapsed T-cycles.
     ///
     /// PPU/APU/Timer are still placeholders (land in M2/M4/M5) so they are
     /// not yet advanced here; the CPU already runs against the MMU's flat
