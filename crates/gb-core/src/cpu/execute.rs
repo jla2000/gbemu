@@ -284,7 +284,7 @@ pub(super) fn execute(cpu: &mut Cpu, bus: &mut impl Bus, opcode: u8) -> u8 {
 
         // --- 0x40..0x7F: 8-bit register/(HL) loads, HALT at 0x76 ---
         0x76 => {
-            cpu.halted = true;
+            halt(cpu, bus);
             4
         }
         0x40..=0x7F => ld_r_r(cpu, bus, opcode),
@@ -489,7 +489,7 @@ pub(super) fn execute(cpu: &mut Cpu, bus: &mut impl Bus, opcode: u8) -> u8 {
             16
         }
         0xFB => {
-            cpu.ime = true;
+            cpu.schedule_ime_enable();
             4
         }
         0xFC => 4, // unused opcode
@@ -783,6 +783,20 @@ fn rst(cpu: &mut Cpu, bus: &mut impl Bus, addr: u16) {
     cpu.regs.pc = addr;
 }
 
+// --- HALT + HALT bug ---
+
+/// HALT (0x76): halts CPU fetch/execute until an enabled interrupt wakes it
+/// — *unless* IME=0 and an interrupt is already pending-and-enabled at the
+/// moment HALT executes, in which case real hardware does not halt at all
+/// and instead triggers the HALT bug (next opcode byte fetched twice).
+fn halt(cpu: &mut Cpu, bus: &mut impl Bus) {
+    if !cpu.ime && super::interrupt_pending(bus) {
+        cpu.trigger_halt_bug();
+    } else {
+        cpu.halted = true;
+    }
+}
+
 // --- control flow ---
 
 fn jr_cc(cpu: &mut Cpu, bus: &mut impl Bus, cond: bool) -> u8 {
@@ -1040,14 +1054,17 @@ mod tests {
     }
 
     #[test]
-    fn di_ei_toggle_ime() {
+    fn di_is_immediate_ei_is_delayed_by_one_instruction() {
         let mut cpu = Cpu::new();
         let mut bus = FlatBus::new();
         bus.mem[0] = 0xF3; // DI
         bus.mem[1] = 0xFB; // EI
-        cpu.step(&mut bus);
+        bus.mem[2] = 0x00; // NOP - EI's effect lands after this executes
+        cpu.step(&mut bus); // DI
         assert!(!cpu.ime);
-        cpu.step(&mut bus);
+        cpu.step(&mut bus); // EI: not yet enabled
+        assert!(!cpu.ime);
+        cpu.step(&mut bus); // NOP: now enabled
         assert!(cpu.ime);
     }
 
