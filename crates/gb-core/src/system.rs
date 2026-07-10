@@ -2,26 +2,25 @@
 //!
 //! `step()` runs the CPU against the MMU's flat 64KB bus (M1), including
 //! interrupt dispatch, the serial port's loopback output capture, and the
-//! timer. The serial port and timer live on the MMU (`system.mmu.serial`,
-//! `system.mmu.timer`), not as separate `System` fields — they're
-//! I/O-mapped register blocks (`SB`/`SC`, `DIV`/`TIMA`/`TMA`/`TAC`) owned
-//! by whatever owns the address space, same as PPU/APU/Joypad registers
-//! will be once those land. PPU/APU stepping by elapsed T-cycles, and
-//! `run_frame()`'s VBlank-driven loop, land in M2 onward as those
-//! components stop being placeholders.
+//! timer. The serial port, timer, and PPU registers live on the MMU
+//! (`system.mmu.serial`, `system.mmu.timer`, `system.mmu.ppu`), not as
+//! separate `System` fields — they're I/O-mapped register blocks (`SB`/`SC`,
+//! `DIV`/`TIMA`/`TMA`/`TAC`, `LCDC`/`STAT`/...) owned by whatever owns the
+//! address space, same as APU/Joypad registers will be once those land.
+//! PPU dot-accurate mode sequencing/rendering, APU stepping by elapsed
+//! T-cycles, and `run_frame()`'s VBlank-driven loop, land in M2 onward as
+//! those components stop being placeholders.
 
 use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::joypad::Joypad;
 use crate::mmu::Mmu;
-use crate::ppu::Ppu;
 
 /// Top-level emulated system.
 #[derive(Debug, Default)]
 pub struct System {
     pub cpu: Cpu,
-    pub ppu: Ppu,
     pub apu: Apu,
     pub mmu: Mmu,
     pub joypad: Joypad,
@@ -32,7 +31,6 @@ impl System {
     pub fn new() -> Self {
         Self {
             cpu: Cpu::new(),
-            ppu: Ppu::new(),
             apu: Apu::new(),
             mmu: Mmu::new(),
             joypad: Joypad::new(),
@@ -51,9 +49,9 @@ impl System {
     /// and advance other components by the elapsed T-cycles. Returns the
     /// elapsed T-cycles.
     ///
-    /// PPU/APU are still placeholders (land in M2/M5) so they are not yet
-    /// advanced here; the CPU already runs against the MMU's flat 64KB bus,
-    /// and the timer already advances in step with it.
+    /// PPU mode sequencing/APU are still placeholders (land in M2/M5) so
+    /// they are not yet advanced here; the CPU already runs against the
+    /// MMU's flat 64KB bus, and the timer already advances in step with it.
     pub fn step(&mut self) -> u8 {
         let cycles = self.cpu.step(&mut self.mmu);
         self.mmu.step_timer(cycles);
