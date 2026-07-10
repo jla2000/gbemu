@@ -213,7 +213,7 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 ### M2 — PPU
 - [x] LCDC/STAT/SCX/SCY/WX/WY/BGP/OBP0/OBP1 registers.
 - [x] Dot-accurate mode sequencing (2→3→0 ×144, then Mode 1 ×10 lines).
-- [ ] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
+- [x] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
       OBJ-OBJ priority (X-coord + OAM index).
 - [ ] Half-block video widget in `gb-tui`, truecolor palette.
 - [ ] Passes `dmg-acid2` and Mealybug Tearoom suite.

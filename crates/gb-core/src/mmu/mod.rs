@@ -8,25 +8,26 @@
 //! HRAM regions, PPU/APU/Timer/Joypad register side effects — lands
 //! incrementally in M2/M3/M4/M5.
 //!
-//! `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07), and
-//! the PPU register block (`LCDC`/`STAT`/`SCY`/`SCX`/`LY`/`LYC`/`BGP`/
-//! `OBP0`/`OBP1`/`WY`/`WX`, 0xFF40-0xFF4B minus the OAM DMA register at
-//! 0xFF46 which lands with M4 DMA timing) are the exceptions: routed to a
-//! real [`Serial`], [`Timer`], and [`Ppu`] respectively, since the Blargg
-//! harness needs serial output capture, `instr_timing`/`mem_timing`(-2)
-//! self-time via a genuinely-running `TIMA` (pulled forward from M4 — see
-//! `SPEC.md`), and M2 needs real PPU register storage. I/O-mapped
+//! `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07), the
+//! PPU register block (`LCDC`/`STAT`/`SCY`/`SCX`/`LY`/`LYC`/`BGP`/`OBP0`/
+//! `OBP1`/`WY`/`WX`, 0xFF40-0xFF4B minus the OAM DMA register at 0xFF46
+//! which lands with M4 DMA timing), and VRAM (0x8000-0x9FFF) + OAM
+//! (0xFE00-0xFE9F) are the exceptions: routed to a real [`Serial`],
+//! [`Timer`], and [`Ppu`] respectively, since the Blargg harness needs
+//! serial output capture, `instr_timing`/`mem_timing`(-2) self-time via a
+//! genuinely-running `TIMA` (pulled forward from M4 — see `SPEC.md`), and
+//! M2 needs real PPU register/VRAM/OAM storage for rendering. I/O-mapped
 //! components naturally live behind the bus that owns their address range —
 //! the MMU, not `System`, is where this and later APU/Joypad register
 //! wiring belong. `IF` (0xFF0F) is likewise real: interrupt dispatch, the
 //! serial-complete request, and the timer-overflow request all need a live
 //! IF byte, and it's just flat memory until other interrupt sources
-//! (PPU/Joypad) land.
+//! (Joypad) land.
 //!
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
 use crate::cpu::{Bus, IF_ADDR};
-use crate::ppu::{Ppu, STAT_INT_BIT, VBLANK_INT_BIT};
+use crate::ppu::{Ppu, OAM_BASE, STAT_INT_BIT, VBLANK_INT_BIT, VRAM_BASE};
 use crate::serial::{Serial, SERIAL_INT_BIT};
 use crate::timer::{Timer, TIMER_INT_BIT};
 
@@ -47,6 +48,8 @@ const OBP0_ADDR: u16 = 0xFF48;
 const OBP1_ADDR: u16 = 0xFF49;
 const WY_ADDR: u16 = 0xFF4A;
 const WX_ADDR: u16 = 0xFF4B;
+const VRAM_END: u16 = 0x9FFF;
+const OAM_END: u16 = 0xFE9F;
 
 /// Flat 64KB-addressable memory, plus the real serial port, timer, and PPU
 /// registers. Every other address hits the same backing array for every
@@ -141,6 +144,8 @@ impl Bus for Mmu {
             OBP1_ADDR => self.ppu.read_obp1(),
             WY_ADDR => self.ppu.read_wy(),
             WX_ADDR => self.ppu.read_wx(),
+            VRAM_BASE..=VRAM_END => self.ppu.read_vram(addr),
+            OAM_BASE..=OAM_END => self.ppu.read_oam(addr),
             _ => self.mem[addr as usize],
         }
     }
@@ -169,6 +174,8 @@ impl Bus for Mmu {
             OBP1_ADDR => self.ppu.write_obp1(val),
             WY_ADDR => self.ppu.write_wy(val),
             WX_ADDR => self.ppu.write_wx(val),
+            VRAM_BASE..=VRAM_END => self.ppu.write_vram(addr, val),
+            OAM_BASE..=OAM_END => self.ppu.write_oam(addr, val),
             _ => self.mem[addr as usize] = val,
         }
     }
