@@ -26,7 +26,7 @@
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
 use crate::cpu::{Bus, IF_ADDR};
-use crate::ppu::Ppu;
+use crate::ppu::{Ppu, STAT_INT_BIT, VBLANK_INT_BIT};
 use crate::serial::{Serial, SERIAL_INT_BIT};
 use crate::timer::{Timer, TIMER_INT_BIT};
 
@@ -103,6 +103,20 @@ impl Mmu {
         self.timer.step(t_cycles);
         if self.timer.take_interrupt() {
             self.mem[IF_ADDR as usize] |= TIMER_INT_BIT;
+        }
+    }
+
+    /// Advances the PPU mode sequencer by `t_cycles` T-cycles and folds any
+    /// resulting VBlank/STAT interrupts into `IF`. Called from
+    /// `System::step` once per CPU instruction with its elapsed cycle
+    /// count.
+    pub fn step_ppu(&mut self, t_cycles: u8) {
+        self.ppu.step(t_cycles);
+        if self.ppu.take_vblank_interrupt() {
+            self.mem[IF_ADDR as usize] |= VBLANK_INT_BIT;
+        }
+        if self.ppu.take_stat_interrupt() {
+            self.mem[IF_ADDR as usize] |= STAT_INT_BIT;
         }
     }
 }
