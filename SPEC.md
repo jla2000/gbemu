@@ -211,7 +211,7 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
   `tests/blargg/tests/` until its milestone lands.
 
 ### M2 — PPU
-- [ ] LCDC/STAT/SCX/SCY/WX/WY/BGP/OBP0/OBP1 registers.
+- [x] LCDC/STAT/SCX/SCY/WX/WY/BGP/OBP0/OBP1 registers.
 - [ ] Dot-accurate mode sequencing (2→3→0 ×144, then Mode 1 ×10 lines).
 - [ ] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
       OBJ-OBJ priority (X-coord + OAM index).

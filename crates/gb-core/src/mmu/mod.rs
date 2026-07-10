@@ -8,14 +8,17 @@
 //! HRAM regions, PPU/APU/Timer/Joypad register side effects — lands
 //! incrementally in M2/M3/M4/M5.
 //!
-//! `SB`/`SC` (0xFF01/0xFF02) and `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07)
-//! are the exceptions: routed to a real [`Serial`] and [`Timer`]
-//! respectively, since the Blargg harness needs serial output capture and
-//! `instr_timing`/`mem_timing`(-2) self-time via a genuinely-running `TIMA`
-//! (pulled forward from M4 — see `SPEC.md`). I/O-mapped components
-//! naturally live behind the bus that owns their address range — the MMU,
-//! not `System`, is where this and later PPU/APU/Joypad register wiring
-//! belong. `IF` (0xFF0F) is likewise real: interrupt dispatch, the
+//! `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07), and
+//! the PPU register block (`LCDC`/`STAT`/`SCY`/`SCX`/`LY`/`LYC`/`BGP`/
+//! `OBP0`/`OBP1`/`WY`/`WX`, 0xFF40-0xFF4B minus the OAM DMA register at
+//! 0xFF46 which lands with M4 DMA timing) are the exceptions: routed to a
+//! real [`Serial`], [`Timer`], and [`Ppu`] respectively, since the Blargg
+//! harness needs serial output capture, `instr_timing`/`mem_timing`(-2)
+//! self-time via a genuinely-running `TIMA` (pulled forward from M4 — see
+//! `SPEC.md`), and M2 needs real PPU register storage. I/O-mapped
+//! components naturally live behind the bus that owns their address range —
+//! the MMU, not `System`, is where this and later APU/Joypad register
+//! wiring belong. `IF` (0xFF0F) is likewise real: interrupt dispatch, the
 //! serial-complete request, and the timer-overflow request all need a live
 //! IF byte, and it's just flat memory until other interrupt sources
 //! (PPU/Joypad) land.
@@ -23,6 +26,7 @@
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
 use crate::cpu::{Bus, IF_ADDR};
+use crate::ppu::Ppu;
 use crate::serial::{Serial, SERIAL_INT_BIT};
 use crate::timer::{Timer, TIMER_INT_BIT};
 
@@ -32,16 +36,28 @@ const DIV_ADDR: u16 = 0xFF04;
 const TIMA_ADDR: u16 = 0xFF05;
 const TMA_ADDR: u16 = 0xFF06;
 const TAC_ADDR: u16 = 0xFF07;
+const LCDC_ADDR: u16 = 0xFF40;
+const STAT_ADDR: u16 = 0xFF41;
+const SCY_ADDR: u16 = 0xFF42;
+const SCX_ADDR: u16 = 0xFF43;
+const LY_ADDR: u16 = 0xFF44;
+const LYC_ADDR: u16 = 0xFF45;
+const BGP_ADDR: u16 = 0xFF47;
+const OBP0_ADDR: u16 = 0xFF48;
+const OBP1_ADDR: u16 = 0xFF49;
+const WY_ADDR: u16 = 0xFF4A;
+const WX_ADDR: u16 = 0xFF4B;
 
-/// Flat 64KB-addressable memory, plus the real serial port and timer.
-/// Every other address hits the same backing array for every address — no
-/// banking, no region-specific behavior. Replaced by a real memory map as
-/// cartridge/PPU/APU/Joypad land.
+/// Flat 64KB-addressable memory, plus the real serial port, timer, and PPU
+/// registers. Every other address hits the same backing array for every
+/// address — no banking, no region-specific behavior. Replaced by a real
+/// memory map as cartridge/APU/Joypad land.
 #[derive(Clone)]
 pub struct Mmu {
     mem: [u8; 0x10000],
     pub serial: Serial,
     pub timer: Timer,
+    pub ppu: Ppu,
 }
 
 impl std::fmt::Debug for Mmu {
@@ -50,6 +66,7 @@ impl std::fmt::Debug for Mmu {
             .field("mem", &"[u8; 65536]")
             .field("serial", &self.serial)
             .field("timer", &self.timer)
+            .field("ppu", &self.ppu)
             .finish()
     }
 }
@@ -60,6 +77,7 @@ impl Default for Mmu {
             mem: [0; 0x10000],
             serial: Serial::new(),
             timer: Timer::new(),
+            ppu: Ppu::new(),
         }
     }
 }
@@ -98,6 +116,17 @@ impl Bus for Mmu {
             TIMA_ADDR => self.timer.read_tima(),
             TMA_ADDR => self.timer.read_tma(),
             TAC_ADDR => self.timer.read_tac(),
+            LCDC_ADDR => self.ppu.read_lcdc(),
+            STAT_ADDR => self.ppu.read_stat(),
+            SCY_ADDR => self.ppu.read_scy(),
+            SCX_ADDR => self.ppu.read_scx(),
+            LY_ADDR => self.ppu.read_ly(),
+            LYC_ADDR => self.ppu.read_lyc(),
+            BGP_ADDR => self.ppu.read_bgp(),
+            OBP0_ADDR => self.ppu.read_obp0(),
+            OBP1_ADDR => self.ppu.read_obp1(),
+            WY_ADDR => self.ppu.read_wy(),
+            WX_ADDR => self.ppu.read_wx(),
             _ => self.mem[addr as usize],
         }
     }
@@ -115,6 +144,17 @@ impl Bus for Mmu {
             TIMA_ADDR => self.timer.write_tima(val),
             TMA_ADDR => self.timer.write_tma(val),
             TAC_ADDR => self.timer.write_tac(val),
+            LCDC_ADDR => self.ppu.write_lcdc(val),
+            STAT_ADDR => self.ppu.write_stat(val),
+            SCY_ADDR => self.ppu.write_scy(val),
+            SCX_ADDR => self.ppu.write_scx(val),
+            LY_ADDR => self.ppu.write_ly(val),
+            LYC_ADDR => self.ppu.write_lyc(val),
+            BGP_ADDR => self.ppu.write_bgp(val),
+            OBP0_ADDR => self.ppu.write_obp0(val),
+            OBP1_ADDR => self.ppu.write_obp1(val),
+            WY_ADDR => self.ppu.write_wy(val),
+            WX_ADDR => self.ppu.write_wx(val),
             _ => self.mem[addr as usize] = val,
         }
     }
@@ -153,6 +193,20 @@ mod tests {
         let data = vec![0x42u8; 0x20000]; // bigger than 64KB
         mmu.load_rom(&data);
         assert_eq!(mmu.read(0xFFFF), 0x42);
+    }
+
+    #[test]
+    fn ppu_registers_are_routed_to_the_ppu_not_flat_memory() {
+        let mut mmu = Mmu::new();
+        mmu.write(LCDC_ADDR, 0x91);
+        mmu.write(SCY_ADDR, 7);
+        mmu.write(BGP_ADDR, 0xE4);
+        assert_eq!(mmu.read(LCDC_ADDR), 0x91);
+        assert_eq!(mmu.read(SCY_ADDR), 7);
+        assert_eq!(mmu.read(BGP_ADDR), 0xE4);
+        // LY is read-only; writes through the bus are ignored.
+        mmu.write(LY_ADDR, 42);
+        assert_eq!(mmu.read(LY_ADDR), 0);
     }
 
     #[test]
