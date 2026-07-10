@@ -4,6 +4,7 @@
 mod app;
 mod input;
 mod log_ring;
+mod palette;
 mod render;
 
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use app::App;
+use palette::Palette;
 
 /// Terminal Game Boy (DMG) emulator.
 #[derive(Parser, Debug)]
@@ -35,14 +37,6 @@ struct Cli {
     palette: Palette,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
-enum Palette {
-    /// Classic Game Boy green shades.
-    Classic,
-    /// Neutral grayscale shades.
-    Grayscale,
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -56,7 +50,7 @@ fn main() -> Result<()> {
     }
 
     let mut terminal = init_terminal()?;
-    let result = run(&mut terminal, cli.rom);
+    let result = run(&mut terminal, cli.rom, cli.palette);
     restore_terminal(&mut terminal)?;
     result
 }
@@ -84,8 +78,9 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     rom: Option<PathBuf>,
+    palette: Palette,
 ) -> Result<()> {
-    let mut app = App::new(rom);
+    let mut app = App::new(rom, palette);
 
     loop {
         terminal.draw(|frame| render::draw(frame, &app))?;

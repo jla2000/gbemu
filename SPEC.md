@@ -215,7 +215,7 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 - [x] Dot-accurate mode sequencing (2→3→0 ×144, then Mode 1 ×10 lines).
 - [x] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
       OBJ-OBJ priority (X-coord + OAM index).
-- [ ] Half-block video widget in `gb-tui`, truecolor palette.
+- [x] Half-block video widget in `gb-tui`, truecolor palette.
 - [ ] Passes `dmg-acid2` and Mealybug Tearoom suite.
 - [ ] Blargg harness passes: `halt_bug` (needs `LY`/VBlank polling — see M1).
 

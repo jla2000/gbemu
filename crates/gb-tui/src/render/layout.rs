@@ -29,7 +29,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .constraints([Constraint::Min(SCREEN_ROWS), Constraint::Length(1)])
         .split(area);
 
-    frame.render_widget(VideoWidget, chunks[0]);
+    let framebuffer = app.system.mmu.ppu.framebuffer();
+    frame.render_widget(VideoWidget::new(framebuffer, app.palette), chunks[0]);
     draw_status_line(frame, app, chunks[1]);
 }
 
