@@ -244,18 +244,26 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       enough (real games don't rely on it) that it's being left as a
       documented gap rather than implemented speculatively.
 - [ ] First playable commercial ROM, full framerate pacing. Framerate
-      pacing itself is implemented (wall-clock `run_frame()`-per-tick in
-      `gb-tui`'s main loop, interim until M5's audio-backpressure pacing)
-      and keyboard input is wired end-to-end, but "first playable
-      commercial ROM" is an experiential claim this environment can't
-      verify — no ROM file and no attached TTY to interactively drive the
-      real terminal UI.
+      pacing is implemented (audio-buffer-backpressure pacing when an
+      output device is available, wall-clock `run_frame()`-per-tick
+      fallback otherwise — see M5) and keyboard input is wired
+      end-to-end, but "first playable commercial ROM" is an experiential
+      claim this environment can't verify — no ROM file and no attached
+      TTY to interactively drive the real terminal UI.
 
 ### M5 — Audio
-- [ ] APU: pulse×2, wave, noise channels, frame sequencer.
-- [ ] Mixer → ring buffer → `cpal` output stream.
-- [ ] Emulation pacing driven by audio buffer backpressure.
-- [ ] `dmg_sound` Blargg tests pass.
+- [x] APU: pulse×2, wave, noise channels, frame sequencer.
+- [x] Mixer → ring buffer → `cpal` output stream.
+- [x] Emulation pacing driven by audio buffer backpressure (falls back to
+      wall-clock pacing when no output device is available — this
+      sandbox's usual case, verified: `cpal`'s ALSA backend finds no real
+      card here).
+- [ ] `dmg_sound` Blargg tests pass. Test file added; unverified — no ROM
+      available in this environment. A couple of specific subtests
+      (zombie-mode envelope glitch, sweep's second overflow check) aren't
+      expected to pass even with a ROM — documented gaps in
+      `gb_core::apu`'s module doc, narrow enough not to be worth chasing
+      without a way to verify against them.
 
 ### M6 — Debugger
 - [ ] Disassembly panel (live, centered on PC).

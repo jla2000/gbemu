@@ -8,9 +8,10 @@
 //! - `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07),
 //!   `JOYP` (0xFF00), the PPU register block (`LCDC`/`STAT`/...
 //!   0xFF40-0xFF4B minus the OAM DMA register at 0xFF46, handled
-//!   separately below), and VRAM (0x8000-0x9FFF) + OAM (0xFE00-0xFE9F) —
-//!   routed to a real [`Serial`], [`Timer`], [`Joypad`], and [`Ppu`]
-//!   respectively.
+//!   separately below), the APU register block (`NR10`-`NR52`,
+//!   0xFF10-0xFF26, plus wave RAM at 0xFF30-0xFF3F), and VRAM
+//!   (0x8000-0x9FFF) + OAM (0xFE00-0xFE9F) — routed to a real [`Serial`],
+//!   [`Timer`], [`Joypad`], [`crate::apu::Apu`], and [`Ppu`] respectively.
 //! - ROM (0x0000-0x7FFF) and external/cartridge RAM (0xA000-0xBFFF) — when
 //!   a [`Cartridge`] is installed via [`Mmu::load_cartridge`], routed
 //!   there for real bank switching; otherwise (no cartridge — e.g. the
@@ -28,13 +29,14 @@
 //!   reads through [`Mmu::dispatch_read`] directly, bypassing that gate.
 //!
 //! I/O-mapped components naturally live behind the bus that owns their
-//! address range — the MMU, not `System`, is where this and later APU
-//! register wiring belong. `IF` (0xFF0F) is likewise real: interrupt
-//! dispatch, the serial-complete/timer-overflow/joypad requests all need a
-//! live IF byte, and it's just flat memory otherwise.
+//! address range — the MMU, not `System`, is where this wiring belongs.
+//! `IF` (0xFF0F) is likewise real: interrupt dispatch, the
+//! serial-complete/timer-overflow/joypad requests all need a live IF
+//! byte, and it's just flat memory otherwise.
 //!
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
+use crate::apu::Apu;
 use crate::cartridge::Cartridge;
 use crate::cpu::{Bus, IF_ADDR};
 use crate::joypad::{Joypad, JOYPAD_INT_BIT};
@@ -49,6 +51,29 @@ const DIV_ADDR: u16 = 0xFF04;
 const TIMA_ADDR: u16 = 0xFF05;
 const TMA_ADDR: u16 = 0xFF06;
 const TAC_ADDR: u16 = 0xFF07;
+const NR10_ADDR: u16 = 0xFF10;
+const NR11_ADDR: u16 = 0xFF11;
+const NR12_ADDR: u16 = 0xFF12;
+const NR13_ADDR: u16 = 0xFF13;
+const NR14_ADDR: u16 = 0xFF14;
+const NR21_ADDR: u16 = 0xFF16;
+const NR22_ADDR: u16 = 0xFF17;
+const NR23_ADDR: u16 = 0xFF18;
+const NR24_ADDR: u16 = 0xFF19;
+const NR30_ADDR: u16 = 0xFF1A;
+const NR31_ADDR: u16 = 0xFF1B;
+const NR32_ADDR: u16 = 0xFF1C;
+const NR33_ADDR: u16 = 0xFF1D;
+const NR34_ADDR: u16 = 0xFF1E;
+const NR41_ADDR: u16 = 0xFF20;
+const NR42_ADDR: u16 = 0xFF21;
+const NR43_ADDR: u16 = 0xFF22;
+const NR44_ADDR: u16 = 0xFF23;
+const NR50_ADDR: u16 = 0xFF24;
+const NR51_ADDR: u16 = 0xFF25;
+const NR52_ADDR: u16 = 0xFF26;
+const WAVE_RAM_START: u16 = 0xFF30;
+const WAVE_RAM_END: u16 = 0xFF3F;
 const LCDC_ADDR: u16 = 0xFF40;
 const STAT_ADDR: u16 = 0xFF41;
 const SCY_ADDR: u16 = 0xFF42;
@@ -85,6 +110,7 @@ pub struct Mmu {
     pub timer: Timer,
     pub ppu: Ppu,
     pub joypad: Joypad,
+    pub apu: Apu,
     pub cartridge: Option<Cartridge>,
 
     dma_active: bool,
@@ -101,6 +127,7 @@ impl std::fmt::Debug for Mmu {
             .field("timer", &self.timer)
             .field("ppu", &self.ppu)
             .field("joypad", &self.joypad)
+            .field("apu", &self.apu)
             .field("cartridge", &self.cartridge)
             .field("dma_active", &self.dma_active)
             .finish()
@@ -115,6 +142,7 @@ impl Default for Mmu {
             timer: Timer::new(),
             ppu: Ppu::new(),
             joypad: Joypad::new(),
+            apu: Apu::new(),
             cartridge: None,
             dma_active: false,
             dma_source_high: 0,
@@ -193,6 +221,13 @@ impl Mmu {
         }
     }
 
+    /// Advances the APU (all 4 channels, frame sequencer, and sample
+    /// generation into its ring buffer) by `t_cycles` T-cycles. Called
+    /// from `System::step` once per CPU instruction.
+    pub fn step_apu(&mut self, t_cycles: u8) {
+        self.apu.step(t_cycles);
+    }
+
     /// Advances an in-progress OAM DMA transfer by `t_cycles` T-cycles,
     /// copying one byte every 4 T-cycles until all 160 are done. No-op
     /// when no transfer is active. Called from `System::step` once per CPU
@@ -226,6 +261,24 @@ impl Mmu {
             TIMA_ADDR => self.timer.read_tima(),
             TMA_ADDR => self.timer.read_tma(),
             TAC_ADDR => self.timer.read_tac(),
+            NR10_ADDR => self.apu.read_nr10(),
+            NR11_ADDR => self.apu.read_nr11(),
+            NR12_ADDR => self.apu.read_nr12(),
+            NR13_ADDR | NR23_ADDR | NR31_ADDR | NR33_ADDR | NR41_ADDR => 0xFF, // write-only
+            NR14_ADDR => self.apu.read_nr14(),
+            NR21_ADDR => self.apu.read_nr21(),
+            NR22_ADDR => self.apu.read_nr22(),
+            NR24_ADDR => self.apu.read_nr24(),
+            NR30_ADDR => self.apu.read_nr30(),
+            NR32_ADDR => self.apu.read_nr32(),
+            NR34_ADDR => self.apu.read_nr34(),
+            NR42_ADDR => self.apu.read_nr42(),
+            NR43_ADDR => self.apu.read_nr43(),
+            NR44_ADDR => self.apu.read_nr44(),
+            NR50_ADDR => self.apu.read_nr50(),
+            NR51_ADDR => self.apu.read_nr51(),
+            NR52_ADDR => self.apu.read_nr52(),
+            WAVE_RAM_START..=WAVE_RAM_END => self.apu.read_wave_ram(addr),
             LCDC_ADDR => self.ppu.read_lcdc(),
             STAT_ADDR => self.ppu.read_stat(),
             SCY_ADDR => self.ppu.read_scy(),
@@ -267,6 +320,28 @@ impl Mmu {
             TIMA_ADDR => self.timer.write_tima(val),
             TMA_ADDR => self.timer.write_tma(val),
             TAC_ADDR => self.timer.write_tac(val),
+            NR10_ADDR => self.apu.write_nr10(val),
+            NR11_ADDR => self.apu.write_nr11(val),
+            NR12_ADDR => self.apu.write_nr12(val),
+            NR13_ADDR => self.apu.write_nr13(val),
+            NR14_ADDR => self.apu.write_nr14(val),
+            NR21_ADDR => self.apu.write_nr21(val),
+            NR22_ADDR => self.apu.write_nr22(val),
+            NR23_ADDR => self.apu.write_nr23(val),
+            NR24_ADDR => self.apu.write_nr24(val),
+            NR30_ADDR => self.apu.write_nr30(val),
+            NR31_ADDR => self.apu.write_nr31(val),
+            NR32_ADDR => self.apu.write_nr32(val),
+            NR33_ADDR => self.apu.write_nr33(val),
+            NR34_ADDR => self.apu.write_nr34(val),
+            NR41_ADDR => self.apu.write_nr41(val),
+            NR42_ADDR => self.apu.write_nr42(val),
+            NR43_ADDR => self.apu.write_nr43(val),
+            NR44_ADDR => self.apu.write_nr44(val),
+            NR50_ADDR => self.apu.write_nr50(val),
+            NR51_ADDR => self.apu.write_nr51(val),
+            NR52_ADDR => self.apu.write_nr52(val),
+            WAVE_RAM_START..=WAVE_RAM_END => self.apu.write_wave_ram(addr, val),
             LCDC_ADDR => self.ppu.write_lcdc(val),
             STAT_ADDR => self.ppu.write_stat(val),
             SCY_ADDR => self.ppu.write_scy(val),
@@ -414,6 +489,21 @@ mod tests {
         mmu.write(JOYP_ADDR, 0x20); // select direction row
         mmu.joypad.set_button(Button::Up, true);
         assert_eq!(mmu.read(JOYP_ADDR) & 0x0F, 0b1011); // bit 2 (Up) low
+    }
+
+    #[test]
+    fn apu_registers_and_wave_ram_are_routed_to_the_apu() {
+        let mut mmu = Mmu::new();
+        mmu.write(NR52_ADDR, 0x80); // power on
+        mmu.write(NR50_ADDR, 0x77);
+        mmu.write(NR51_ADDR, 0xFF);
+        mmu.write(WAVE_RAM_START, 0xAB);
+        assert_eq!(mmu.read(NR50_ADDR), 0x77);
+        assert_eq!(mmu.read(NR51_ADDR), 0xFF);
+        assert_eq!(mmu.read(WAVE_RAM_START), 0xAB);
+        // Write-only registers read back as open bus.
+        mmu.write(NR13_ADDR, 0x42);
+        assert_eq!(mmu.read(NR13_ADDR), 0xFF);
     }
 
     #[test]

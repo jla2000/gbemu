@@ -2,6 +2,7 @@
 //! top-level render loop.
 
 mod app;
+mod audio;
 mod input;
 mod log_ring;
 mod palette;
@@ -114,13 +115,18 @@ fn restore_terminal(
 const SAVE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// DMG refresh rate: 70224 dots/frame at 4.194304 MHz == ~59.7275 Hz.
-/// Interim wall-clock pacing for M4 "first playable ROM" — `SPEC.md`'s
-/// long-term design paces off audio-buffer backpressure instead once M5
-/// lands real audio output, which avoids the audio/video drift a
-/// wall-clock timer alone is prone to.
+/// Fallback pacing when no audio output device is available (this
+/// sandbox's usual case) — otherwise nothing drains the APU's ring
+/// buffer, so the buffer-backpressure pacing below would just see it
+/// permanently full instead of actually tracking real time.
 fn frame_duration() -> Duration {
     Duration::from_secs_f64(70224.0 / 4_194_304.0)
 }
+
+/// How long to sleep between checks while waiting for the audio ring
+/// buffer to drain, when pacing off backpressure. Short enough that input
+/// stays responsive (quit, button presses) during the wait.
+const AUDIO_BACKPRESSURE_POLL: Duration = Duration::from_millis(2);
 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
@@ -142,13 +148,33 @@ fn run(
         }
     }
 
+    // Audio is the preferred pacing source (see SPEC.md's execution
+    // model: pacing off buffer backpressure avoids the audio/video drift
+    // a wall-clock timer alone is prone to). `take_consumer` only
+    // succeeds once; `audio::start` itself degrades to `None` on any
+    // failure (no device, unsupported config, ...), in which case the
+    // wall-clock fallback below takes over instead.
+    let audio_output = app
+        .system
+        .mmu
+        .apu
+        .take_consumer()
+        .and_then(audio::start);
+    if let Some(output) = &audio_output {
+        app.system.mmu.apu.set_sample_rate(output.sample_rate);
+    }
+
     let mut last_save_check = Instant::now();
     let frame_duration = frame_duration();
 
     loop {
         let frame_start = Instant::now();
 
-        if app.run_mode == RunMode::Running {
+        let buffer_has_room = audio_output.as_ref().is_none_or(|_| {
+            app.system.mmu.apu.queued_frames() < app.system.mmu.apu.buffer_capacity_frames()
+        });
+
+        if app.run_mode == RunMode::Running && buffer_has_room {
             app.system.run_frame();
         }
 
@@ -167,9 +193,15 @@ fn run(
             break;
         }
 
-        let elapsed = frame_start.elapsed();
-        if elapsed < frame_duration {
-            std::thread::sleep(frame_duration - elapsed);
+        if audio_output.is_some() {
+            if !buffer_has_room {
+                std::thread::sleep(AUDIO_BACKPRESSURE_POLL);
+            }
+        } else {
+            let elapsed = frame_start.elapsed();
+            if elapsed < frame_duration {
+                std::thread::sleep(frame_duration - elapsed);
+            }
         }
     }
 
