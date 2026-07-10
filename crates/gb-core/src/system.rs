@@ -19,7 +19,7 @@ use crate::mmu::Mmu;
 use crate::ppu::VBLANK_START_LINE;
 
 /// Top-level emulated system.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct System {
     pub cpu: Cpu,
     pub mmu: Mmu,

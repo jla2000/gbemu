@@ -103,9 +103,16 @@ const DMA_T_CYCLES_PER_BYTE: u32 = 4;
 /// registers, joypad, and (once loaded) cartridge. Every other address
 /// hits the same backing array for every address — no region-specific
 /// behavior.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Mmu {
-    mem: [u8; 0x10000],
+    // Boxed (heap-allocated) rather than a bare [u8; 0x10000]: besides
+    // avoiding a 64KB stack copy on every Mmu move, it lets this field
+    // serialize as a plain byte sequence (Box<[u8]>'s native serde impl)
+    // instead of needing serde_big_array's fixed-size-array workaround --
+    // which, combined with the PPU's similarly large arrays, was blowing
+    // the stack during save-state deserialization on threads with a
+    // constrained stack size (e.g. cargo test's default worker threads).
+    mem: Box<[u8]>,
     pub serial: Serial,
     pub timer: Timer,
     pub ppu: Ppu,
@@ -137,7 +144,7 @@ impl std::fmt::Debug for Mmu {
 impl Default for Mmu {
     fn default() -> Self {
         Self {
-            mem: [0; 0x10000],
+            mem: vec![0u8; 0x10000].into_boxed_slice(),
             serial: Serial::new(),
             timer: Timer::new(),
             ppu: Ppu::new(),

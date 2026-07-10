@@ -6,4 +6,6 @@ license.workspace = true
 description = "DMG Game Boy emulation core (no I/O dependencies)"
 
 [dependencies]
+bincode = { version = "2", features = ["serde"] }
 ringbuf = "0.5.0"
+serde = { version = "1.0.228", features = ["derive"] }

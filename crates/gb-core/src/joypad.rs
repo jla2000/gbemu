@@ -29,7 +29,7 @@ pub enum Button {
     Start,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Joypad {
     /// Raw `JOYP` bits 4-5 as last written (0 = that row is selected).
     select_bits: u8,

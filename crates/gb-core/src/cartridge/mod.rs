@@ -37,7 +37,7 @@ const HEADER_CHECKSUM_START: usize = 0x0134;
 const HEADER_CHECKSUM_END: usize = 0x014D; // exclusive
 const HEADER_MIN_LEN: usize = 0x0150;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MbcType {
     None,
     Mbc1,
@@ -50,7 +50,7 @@ pub enum MbcType {
     Unsupported,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Header {
     pub title: String,
     pub cart_type: u8,
@@ -185,7 +185,7 @@ impl Header {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Mbc1State {
     ram_enable: bool,
     rom_bank_low5: u8,
@@ -193,13 +193,13 @@ struct Mbc1State {
     mode1: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Mbc2State {
     ram_enable: bool,
     rom_bank: u8,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct RtcRegisters {
     seconds: u8,
     minutes: u8,
@@ -209,7 +209,7 @@ struct RtcRegisters {
     day_high: u8,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Mbc3State {
     ram_enable: bool,
     rom_bank: u8,
@@ -223,7 +223,7 @@ struct Mbc3State {
     rtc_cycle_accum: u32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Mbc5State {
     ram_enable: bool,
     rom_bank_low8: u8,
@@ -231,7 +231,7 @@ struct Mbc5State {
     ram_bank: u8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 enum MbcState {
     None,
     Mbc1(Mbc1State),
@@ -245,7 +245,7 @@ enum MbcState {
 /// and headless-testable.
 const CYCLES_PER_SECOND: u32 = 4_194_304;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Cartridge {
     pub header: Header,
     rom: Vec<u8>,

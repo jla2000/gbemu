@@ -18,7 +18,7 @@ const WAVE_LENGTH_MAX: u16 = 256;
 /// Shared by pulse channels 1/2 and the noise channel: initial volume,
 /// direction, and period from an `NRx2`-shaped register, plus the
 /// running volume/timer state the 64Hz frame-sequencer step clocks.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 struct Envelope {
     initial_volume: u8,
     add: bool,
@@ -65,7 +65,7 @@ impl Envelope {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 struct Sweep {
     period: u8,
     negate: bool,
@@ -139,7 +139,7 @@ impl Sweep {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) struct PulseChannel {
     has_sweep: bool,
     sweep: Sweep,
@@ -272,7 +272,7 @@ impl PulseChannel {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) struct WaveChannel {
     dac_enabled: bool,
     length_load: u8,
@@ -408,7 +408,7 @@ impl WaveChannel {
 
 const NOISE_DIVISORS: [u16; 8] = [8, 16, 32, 48, 64, 80, 96, 112];
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) struct NoiseChannel {
     length_load: u8,
     length_counter: u16,

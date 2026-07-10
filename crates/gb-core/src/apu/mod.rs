@@ -40,6 +40,7 @@ const NR50_MASK: u8 = 0xFF; // all bits meaningful (VIN passthrough bits include
 const NR51_MASK: u8 = 0xFF;
 const POWER_BIT: u8 = 1 << 7;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Apu {
     enabled: bool,
     nr50: u8,
@@ -55,10 +56,21 @@ pub struct Apu {
     sample_cycle_accum: f64,
     cycles_per_sample: f64,
 
+    // Not real "system state" -- a live SPSC channel to the audio thread.
+    // Skipped on save/load; `System::load_state` swaps the *live* System's
+    // producer/consumer back in after deserializing, rather than adopting
+    // whatever placeholder these defaults produce, so a save-state load
+    // never orphans the frontend's already-connected audio consumer.
+    #[serde(skip, default = "dummy_producer")]
     producer: HeapProd<f32>,
     /// Taken exactly once by the frontend's audio setup via
     /// [`Apu::take_consumer`].
+    #[serde(skip)]
     consumer: Option<HeapCons<f32>>,
+}
+
+fn dummy_producer() -> HeapProd<f32> {
+    HeapRb::<f32>::new(1).split().0
 }
 
 impl std::fmt::Debug for Apu {
@@ -126,6 +138,16 @@ impl Apu {
     /// output thread. Returns `None` if already taken.
     pub fn take_consumer(&mut self) -> Option<HeapCons<f32>> {
         self.consumer.take()
+    }
+
+    /// Swaps the live audio-channel halves (producer + whatever's left of
+    /// the consumer) with `other`. Used by [`crate::system::System::load_state`]
+    /// to preserve the running system's real connection to the frontend's
+    /// audio thread after deserializing a save state, whose `Apu` only has
+    /// a disconnected placeholder (see the `#[serde(skip)]` fields above).
+    pub(crate) fn swap_audio_channel(&mut self, other: &mut Apu) {
+        std::mem::swap(&mut self.producer, &mut other.producer);
+        std::mem::swap(&mut self.consumer, &mut other.consumer);
     }
 
     /// Reconfigures the output sample rate (e.g. once `gb-tui` knows the

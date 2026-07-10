@@ -20,7 +20,7 @@ const SC_INTERNAL_CLOCK: u8 = 0b0000_0001;
 /// Unused `SC` bits read back as 1 on DMG.
 const SC_UNUSED_MASK: u8 = 0b0111_1110;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Serial {
     sb: u8,
     sc: u8,

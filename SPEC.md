@@ -284,6 +284,17 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       breakpoint/watchpoint toggles).
 
 ### M7 — Save states & polish
-- [ ] Full save-state serialization (`serde`+`bincode`), load/save hotkeys.
-- [ ] Resize-prompt overlay + live resize handling.
-- [ ] Palette selection flag, README with test-ROM fetch instructions.
+- [x] Full save-state serialization (`serde`+`bincode`), load/save hotkeys
+      (F2/F3, see `gb-tui::save::quicksave`/`quickload`). Along the way,
+      switched `Mmu`'s and `Ppu`'s large fixed-size byte arrays to boxed
+      slices (`Box<[u8]>`) — besides avoiding large stack-resident copies
+      generally, this fixed a real stack overflow in debug builds when
+      deserializing a save state on a thread with a constrained stack
+      (e.g. `cargo test`'s default worker threads); see the doc comment
+      on `Mmu::mem`.
+- [x] Resize-prompt overlay + live resize handling — already covered by
+      M0's `layout::draw` (recomputes from `frame.area()` every redraw,
+      so `ratatui`/`crossterm` picking up a terminal resize just works)
+      plus its own render test.
+- [x] Palette selection flag (M2's `--palette`), README with test-ROM
+      fetch instructions (`README.md`, `roms/README.md`).

@@ -25,7 +25,7 @@ const TAC_ENABLE: u8 = 0b100;
 /// Hz.
 const TAC_BITS: [u8; 4] = [9, 3, 5, 7];
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Timer {
     div_counter: u16,
     tima: u8,

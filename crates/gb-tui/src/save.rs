@@ -1,8 +1,8 @@
-//! Battery-backed `.sav` file persistence: derives a `.sav` path next to
-//! the ROM, and loads/writes cartridge RAM (+ MBC3 RTC registers) through
-//! it. Actual file I/O is a `gb-tui` concern, not `gb-core`'s — see the
-//! module doc on `gb_core::cartridge` for why that boundary is drawn
-//! there.
+//! Disk persistence: battery-backed `.sav` files (cartridge RAM + MBC3 RTC
+//! registers) and `.state` full save states, both derived from a path next
+//! to the ROM. Actual file I/O is a `gb-tui` concern, not `gb-core`'s — see
+//! the module docs on `gb_core::cartridge` and `gb_core::savestate` for why
+//! that boundary is drawn there.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +10,48 @@ use gb_core::System;
 
 fn sav_path_for(rom_path: &Path) -> PathBuf {
     rom_path.with_extension("sav")
+}
+
+fn state_path_for(rom_path: &Path) -> PathBuf {
+    rom_path.with_extension("state")
+}
+
+/// Writes a full save state to `<rom>.state`. Logged, not propagated —
+/// same reasoning as the rest of this module: a failed save state
+/// shouldn't crash the emulator.
+pub fn quicksave(system: &System, rom_path: &Path) {
+    let bytes = match gb_core::savestate::save(system) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::warn!("failed to encode save state: {e}");
+            return;
+        }
+    };
+    let path = state_path_for(rom_path);
+    match std::fs::write(&path, &bytes) {
+        Ok(()) => tracing::info!("wrote save state to {}", path.display()),
+        Err(e) => tracing::warn!("failed to write {}: {e}", path.display()),
+    }
+}
+
+/// Loads `<rom>.state` into `system` in place, if present.
+pub fn quickload(system: &mut System, rom_path: &Path) {
+    let path = state_path_for(rom_path);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!("no save state at {}", path.display());
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("failed to read {}: {e}", path.display());
+            return;
+        }
+    };
+    match gb_core::savestate::load(system, &bytes) {
+        Ok(()) => tracing::info!("loaded save state from {}", path.display()),
+        Err(e) => tracing::warn!("failed to decode {}: {e}", path.display()),
+    }
 }
 
 /// Loads a `.sav` file next to `rom_path` into the system's cartridge, if
@@ -154,5 +196,37 @@ mod tests {
         persist(&mut system, &rom_path);
         load(&mut system, &rom_path);
         assert!(!sav_path.exists());
+    }
+
+    #[test]
+    fn quicksave_then_quickload_round_trips_full_system_state() {
+        let rom_path = scratch_rom_path("state");
+        let state_path = state_path_for(&rom_path);
+        let _ = std::fs::remove_file(&state_path);
+
+        let mut system = System::new();
+        system.load_rom(&[0x3E, 0x2A]); // LD A, 0x2A
+        system.step();
+        assert_eq!(system.cpu.regs.a, 0x2A);
+
+        quicksave(&system, &rom_path);
+        assert!(state_path.exists());
+
+        let mut fresh = System::new();
+        quickload(&mut fresh, &rom_path);
+        assert_eq!(fresh.cpu.regs.a, 0x2A);
+        assert_eq!(fresh.cpu.regs.pc, 2);
+
+        let _ = std::fs::remove_file(&state_path);
+    }
+
+    #[test]
+    fn quickload_of_missing_state_file_is_a_silent_no_op() {
+        let rom_path = scratch_rom_path("missing-state");
+        let _ = std::fs::remove_file(state_path_for(&rom_path));
+
+        let mut system = System::new();
+        quickload(&mut system, &rom_path); // must not panic
+        assert_eq!(system.cpu.regs.pc, 0);
     }
 }

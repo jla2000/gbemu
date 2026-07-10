@@ -77,7 +77,7 @@ const OAM_ENTRY_SIZE: usize = 4;
 const OAM_ENTRY_COUNT: usize = OAM_SIZE / OAM_ENTRY_SIZE;
 
 /// PPU mode, encoded to match `STAT` bits 0-1 (`Drawing` = 3, etc).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum Mode {
     #[default]
     HBlank = 0,
@@ -86,7 +86,7 @@ enum Mode {
     Drawing = 3,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Ppu {
     lcdc: u8,
     stat: u8,
@@ -110,15 +110,18 @@ pub struct Ppu {
     vblank_interrupt_pending: bool,
     stat_interrupt_pending: bool,
 
-    vram: [u8; VRAM_SIZE],
-    oam: [u8; OAM_SIZE],
+    // Boxed rather than bare [u8; N] arrays -- see Mmu::mem's doc comment
+    // for why (heap allocation instead of large stack-resident copies,
+    // and no need for serde_big_array's fixed-size-array workaround).
+    vram: Box<[u8]>,
+    oam: Box<[u8]>,
     /// Internal window line counter: increments only on scanlines where
     /// the window was actually drawn, resets every frame. This is what
     /// makes the window "remember" its position across an SCY-scrolled BG.
     window_line: u8,
     /// One shade index (0-3, post-palette) per pixel, row-major,
     /// `SCREEN_WIDTH` x `SCREEN_HEIGHT`. Filled one scanline at a time.
-    framebuffer: [u8; SCREEN_WIDTH * SCREEN_HEIGHT],
+    framebuffer: Box<[u8]>,
 }
 
 impl std::fmt::Debug for Ppu {
@@ -163,10 +166,10 @@ impl Default for Ppu {
             stat_line: false,
             vblank_interrupt_pending: false,
             stat_interrupt_pending: false,
-            vram: [0; VRAM_SIZE],
-            oam: [0; OAM_SIZE],
+            vram: vec![0u8; VRAM_SIZE].into_boxed_slice(),
+            oam: vec![0u8; OAM_SIZE].into_boxed_slice(),
             window_line: 0,
-            framebuffer: [0; SCREEN_WIDTH * SCREEN_HEIGHT],
+            framebuffer: vec![0u8; SCREEN_WIDTH * SCREEN_HEIGHT].into_boxed_slice(),
         }
     }
 }
@@ -319,7 +322,9 @@ impl Ppu {
     /// pixel, row-major. Only rows up to the current `LY` reflect this
     /// frame's contents until a full frame has been rendered.
     pub fn framebuffer(&self) -> &[u8; SCREEN_WIDTH * SCREEN_HEIGHT] {
-        &self.framebuffer
+        (&*self.framebuffer)
+            .try_into()
+            .expect("framebuffer is always exactly SCREEN_WIDTH * SCREEN_HEIGHT bytes")
     }
 
     /// Advances the mode sequencer by `t_cycles` T-cycles (== dots). No-op

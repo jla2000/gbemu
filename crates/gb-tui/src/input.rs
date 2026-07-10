@@ -1,10 +1,11 @@
 //! Keyboard input handling: crossterm key events -> joypad/debugger
 //! actions. Covers quit, the GB button mapping (arrows + Z/X/Enter/RShift
-//! = D-pad/A/B/Start/Select), and the debugger keybinds -- F12: toggle
+//! = D-pad/A/B/Start/Select), the debugger keybinds -- F12: toggle
 //! overlay, Tab: cycle panel, Space/N: step one instruction, F: step one
 //! frame, F5: run/pause, B: toggle breakpoint at the current PC, W:
 //! toggle a watchpoint at the memory viewer's cursor, V: cycle the VRAM
-//! panel's sub-tab -- all per `SPEC.md`.
+//! panel's sub-tab -- and save states: F2 quicksaves, F3 quickloads, both
+//! to `<rom>.state` (no-ops without a loaded ROM). All per `SPEC.md`.
 
 use std::time::{Duration, Instant};
 
@@ -116,6 +117,16 @@ fn handle_debug_key(app: &mut App, code: KeyCode) {
             let addr = app.mem_viewer_addr;
             let current = app.system.mmu.read(addr);
             app.breakpoints.toggle_watch(addr, current);
+        }
+        KeyCode::F(2) => {
+            if let Some(rom_path) = app.rom_path.clone() {
+                crate::save::quicksave(&app.system, &rom_path);
+            }
+        }
+        KeyCode::F(3) => {
+            if let Some(rom_path) = app.rom_path.clone() {
+                crate::save::quickload(&mut app.system, &rom_path);
+            }
         }
         _ => {}
     }
