@@ -24,7 +24,7 @@ pub const GB_HEIGHT: u16 = SCREEN_HEIGHT as u16;
 pub const SCREEN_COLS: u16 = GB_WIDTH;
 pub const SCREEN_ROWS: u16 = GB_HEIGHT / 2;
 
-const UPPER_HALF_BLOCK: char = '\u{2580}'; // '▀'
+pub(crate) const UPPER_HALF_BLOCK: char = '\u{2580}'; // '▀'
 
 /// Renders a PPU framebuffer (shade indices 0-3, row-major, `SCREEN_WIDTH`
 /// x `SCREEN_HEIGHT`) into the terminal via `palette`.

@@ -266,13 +266,22 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       without a way to verify against them.
 
 ### M6 — Debugger
-- [ ] Disassembly panel (live, centered on PC).
-- [ ] Registers/flags panel.
-- [ ] Memory viewer (hex, scroll, jump-to-address).
-- [ ] VRAM/tile/BG-map/OAM viewer.
-- [ ] Breakpoints (PC + memory watch) and step/continue/step-frame controls.
-- [ ] Log panel wired to `tracing` ring buffer.
-- [ ] Panel layout + keybinds (Tab cycle, F12 toggle overlay).
+- [x] Disassembly panel (live, centered on PC). "Centered" is approximated
+      as PC-and-forward (marked `->`) rather than truly centered — see
+      the doc comment on `debug::overlay::disassembly_lines` for why
+      showing bytes *before* PC is ambiguous for a variable-length
+      instruction stream without a known-good alignment point.
+- [x] Registers/flags panel.
+- [x] Memory viewer (hex, scroll, jump-to-address via `App::mem_viewer_addr`).
+- [x] VRAM/tile/BG-map/OAM viewer.
+- [x] Breakpoints (PC + memory watch) and step/continue/step-frame controls.
+      Watchpoints are value-change watches, not true read/write-access
+      traps (would need instrumenting every `gb-core` `Bus` call) — see
+      `debug::breakpoints`'s doc comment.
+- [x] Log panel wired to `tracing` ring buffer.
+- [x] Panel layout + keybinds (Tab cycle, F12 toggle overlay, plus
+      Space/N/F/F5 step-instruction/step-frame/run-pause and B/W
+      breakpoint/watchpoint toggles).
 
 ### M7 — Save states & polish
 - [ ] Full save-state serialization (`serde`+`bincode`), load/save hotkeys.

@@ -3,6 +3,7 @@
 
 mod app;
 mod audio;
+mod debug;
 mod input;
 mod log_ring;
 mod palette;
@@ -175,10 +176,10 @@ fn run(
         });
 
         if app.run_mode == RunMode::Running && buffer_has_room {
-            app.system.run_frame();
+            app.run_frame_checking_breakpoints();
         }
 
-        terminal.draw(|frame| render::draw(frame, &app))?;
+        terminal.draw(|frame| render::draw(frame, &mut app))?;
 
         input::handle_events(&mut app)?;
 
@@ -210,4 +211,51 @@ fn run(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+
+    /// End-to-end smoke test: drives `render::draw` (the same function
+    /// the real run loop calls every frame) through a `TestBackend`
+    /// terminal, in both the plain and debug-overlay layouts, across
+    /// every debug panel. This is the closest thing to interactively
+    /// exercising the TUI available in a sandbox with no attached TTY --
+    /// it can't verify the output *looks* right, but it does verify the
+    /// whole render pipeline (video widget, every debug panel, status
+    /// line) runs without panicking against a real ratatui `Buffer`.
+    #[test]
+    fn full_render_pipeline_does_not_panic_across_all_debug_panels() {
+        let backend = TestBackend::new(200, 100);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(None, Palette::Classic);
+        app.system.load_rom(&[0x00]);
+
+        terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+
+        app.debug_overlay = true;
+        for panel in [
+            app::DebugPanel::Disassembly,
+            app::DebugPanel::Registers,
+            app::DebugPanel::Memory,
+            app::DebugPanel::Vram,
+            app::DebugPanel::Log,
+        ] {
+            app.debug_panel = panel;
+            for vram_tab in [app::VramTab::Tiles, app::VramTab::BgMap, app::VramTab::Oam] {
+                app.vram_tab = vram_tab;
+                terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn resize_prompt_renders_without_panicking_on_a_too_small_terminal() {
+        let backend = TestBackend::new(20, 5); // smaller than the GB screen
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(None, Palette::Classic);
+        terminal.draw(|frame| render::draw(frame, &mut app)).unwrap();
+    }
 }

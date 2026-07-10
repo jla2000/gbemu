@@ -1,7 +1,10 @@
 //! Keyboard input handling: crossterm key events -> joypad/debugger
-//! actions. Full debugger keybind mapping (step/breakpoints/panel cycling)
-//! lands in M6; this covers quit + the GB button mapping (arrows + Z/X/
-//! Enter/RShift = D-pad/A/B/Start/Select, per `SPEC.md`).
+//! actions. Covers quit, the GB button mapping (arrows + Z/X/Enter/RShift
+//! = D-pad/A/B/Start/Select), and the debugger keybinds -- F12: toggle
+//! overlay, Tab: cycle panel, Space/N: step one instruction, F: step one
+//! frame, F5: run/pause, B: toggle breakpoint at the current PC, W:
+//! toggle a watchpoint at the memory viewer's cursor, V: cycle the VRAM
+//! panel's sub-tab -- all per `SPEC.md`.
 
 use std::time::{Duration, Instant};
 
@@ -10,7 +13,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, ModifierKeyCode};
 
 use gb_core::joypad::Button;
 
-use crate::app::App;
+use crate::app::{App, RunMode};
 
 /// If a button hasn't seen a fresh press within this window, treat it as
 /// released. Most terminals only ever report key-*press* events (even
@@ -61,6 +64,10 @@ fn handle_key(app: &mut App, code: KeyCode, kind: KeyEventKind, modifiers: event
         _ => {}
     }
 
+    if kind == KeyEventKind::Press {
+        handle_debug_key(app, code);
+    }
+
     let Some(button) = map_key(code) else { return };
     match kind {
         KeyEventKind::Release => {
@@ -71,6 +78,46 @@ fn handle_key(app: &mut App, code: KeyCode, kind: KeyEventKind, modifiers: event
             app.system.mmu.joypad.set_button(button, true);
             app.button_last_pressed.insert(button, Instant::now());
         }
+    }
+}
+
+fn handle_debug_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::F(12) => app.debug_overlay = !app.debug_overlay,
+        KeyCode::Tab if app.debug_overlay => app.cycle_debug_panel(),
+        KeyCode::Char('v') | KeyCode::Char('V')
+            if app.debug_overlay && app.debug_panel == crate::app::DebugPanel::Vram =>
+        {
+            app.cycle_vram_tab();
+        }
+        KeyCode::Char(' ') | KeyCode::Char('n') | KeyCode::Char('N') if app.run_mode == RunMode::Paused => {
+            app.step_one_instruction();
+        }
+        KeyCode::Char('f') | KeyCode::Char('F') if app.run_mode == RunMode::Paused => {
+            // Step one full frame (breakpoint-aware); run_mode stays
+            // Paused either way since it only starts out Paused here and
+            // the call only ever sets it back to Paused, never Running.
+            app.run_frame_checking_breakpoints();
+        }
+        KeyCode::F(5) => {
+            app.run_mode = match app.run_mode {
+                RunMode::Running => RunMode::Paused,
+                RunMode::Paused => RunMode::Running,
+            };
+        }
+        KeyCode::Char('b') | KeyCode::Char('B') if app.debug_overlay => {
+            let pc = app.system.cpu.regs.pc;
+            app.breakpoints.toggle_pc(pc);
+        }
+        KeyCode::Char('w') | KeyCode::Char('W')
+            if app.debug_overlay && app.debug_panel == crate::app::DebugPanel::Memory =>
+        {
+            use gb_core::cpu::Bus;
+            let addr = app.mem_viewer_addr;
+            let current = app.system.mmu.read(addr);
+            app.breakpoints.toggle_watch(addr, current);
+        }
+        _ => {}
     }
 }
 

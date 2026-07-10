@@ -2,12 +2,12 @@
 //! and draws each frame. Debugger panels land in M6.
 
 mod layout;
-mod video;
+pub(crate) mod video;
 
 use ratatui::Frame;
 
 use crate::app::App;
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     layout::draw(frame, app);
 }
