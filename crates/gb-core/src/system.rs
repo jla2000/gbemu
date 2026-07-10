@@ -1,18 +1,19 @@
-//! Ties CPU/PPU/APU/MMU/Joypad/Serial/Timer together and drives execution.
+//! Ties CPU/PPU/APU/MMU/Joypad/Serial/Timer/Cartridge together and drives
+//! execution.
 //!
-//! `step()` runs the CPU against the MMU's flat 64KB bus (M1), including
-//! interrupt dispatch, the serial port's loopback output capture, the
-//! timer, and now the PPU's dot-accurate mode sequencer. The serial port,
-//! timer, and PPU registers live on the MMU (`system.mmu.serial`,
-//! `system.mmu.timer`, `system.mmu.ppu`), not as separate `System` fields —
-//! they're I/O-mapped register blocks (`SB`/`SC`, `DIV`/`TIMA`/`TMA`/`TAC`,
-//! `LCDC`/`STAT`/...) owned by whatever owns the address space, same as
-//! APU/Joypad registers will be once those land. Actual pixel
-//! rendering (BG/window/sprite fetch) and APU stepping by elapsed T-cycles
-//! land in M2/M5 onward.
+//! `step()` runs the CPU against the MMU's bus, including interrupt
+//! dispatch, the serial port's loopback output capture, the timer, the
+//! PPU's dot-accurate mode sequencer, and the cartridge's MBC3 RTC (a
+//! no-op for every other MBC). The serial port, timer, PPU registers, and
+//! cartridge live on the MMU (`system.mmu.serial`, `system.mmu.timer`,
+//! `system.mmu.ppu`, `system.mmu.cartridge`), not as separate `System`
+//! fields — they're either I/O-mapped register blocks (`SB`/`SC`,
+//! `DIV`/`TIMA`/`TMA`/`TAC`, `LCDC`/`STAT`/...) or address-range owners
+//! (ROM/cartridge RAM banking) that naturally belong behind the bus that
+//! owns their range, same as APU/Joypad registers will be once those land.
+//! APU stepping by elapsed T-cycles lands in M5.
 
 use crate::apu::Apu;
-use crate::cartridge::Cartridge;
 use crate::cpu::Cpu;
 use crate::joypad::Joypad;
 use crate::mmu::Mmu;
@@ -25,7 +26,6 @@ pub struct System {
     pub apu: Apu,
     pub mmu: Mmu,
     pub joypad: Joypad,
-    pub cartridge: Option<Cartridge>,
 }
 
 impl System {
@@ -35,15 +35,23 @@ impl System {
             apu: Apu::new(),
             mmu: Mmu::new(),
             joypad: Joypad::new(),
-            cartridge: None,
         }
     }
 
-    /// Load raw ROM bytes directly into the MMU's flat address space (no
-    /// cartridge/MBC banking yet — lands in M3). Enough to boot Blargg test
-    /// ROMs against the M1 CPU core.
+    /// Load raw ROM bytes directly into the MMU's flat address space, no
+    /// cartridge/MBC banking. Used by the Blargg harness and CPU-core unit
+    /// tests that feed it small synthetic byte sequences with no real
+    /// cartridge header — see [`System::load_cartridge`] for real ROM
+    /// files.
     pub fn load_rom(&mut self, data: &[u8]) {
         self.mmu.load_rom(data);
+    }
+
+    /// Parses and installs `data` as a real cartridge (header, MBC,
+    /// banking), replacing any previous cartridge or flat-loaded ROM.
+    /// Returns non-fatal header-validation warnings.
+    pub fn load_cartridge(&mut self, data: &[u8]) -> Vec<String> {
+        self.mmu.load_cartridge(data)
     }
 
     /// Execute a single CPU instruction — including interrupt dispatch —
@@ -51,12 +59,14 @@ impl System {
     /// elapsed T-cycles.
     ///
     /// APU is still a placeholder (lands in M5) so it is not yet advanced
-    /// here; the CPU already runs against the MMU's flat 64KB bus, and the
-    /// timer and PPU mode sequencer already advance in step with it.
+    /// here; the CPU already runs against the MMU's bus, and the
+    /// timer, PPU mode sequencer, and cartridge RTC already advance in
+    /// step with it.
     pub fn step(&mut self) -> u8 {
         let cycles = self.cpu.step(&mut self.mmu);
         self.mmu.step_timer(cycles);
         self.mmu.step_ppu(cycles);
+        self.mmu.step_cartridge(cycles);
         cycles
     }
 

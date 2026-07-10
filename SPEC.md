@@ -217,15 +217,20 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       OBJ-OBJ priority (X-coord + OAM index).
 - [x] Half-block video widget in `gb-tui`, truecolor palette.
 - [ ] Passes `dmg-acid2` and Mealybug Tearoom suite.
-- [ ] Blargg harness passes: `halt_bug` (needs `LY`/VBlank polling — see M1).
+- [ ] Blargg harness passes: `halt_bug`. Un-ignored (no longer needs
+      `LY`/VBlank polling); still unverified — no test ROM available in
+      this environment. Fetch `roms/blargg/halt_bug.gb` and run
+      `cargo test -p gbemu-blargg-tests halt_bug` to check this off.
 
 ### M3 — Cartridges
-- [ ] ROM header parsing + validation warnings.
-- [ ] MBC0, MBC1 (+ banking mode quirk), MBC2 (nibble RAM), MBC3 (+RTC
+- [x] ROM header parsing + validation warnings.
+- [x] MBC0, MBC1 (+ banking mode quirk), MBC2 (nibble RAM), MBC3 (+RTC
       latch), MBC5.
-- [ ] Battery-backed `.sav` load/persist (write on exit + dirty interval).
-- [ ] Blargg harness passes: `cpu_instrs`, `mem_timing`, `mem_timing-2`
-      (need MBC1 ROM bank switching — see M1).
+- [x] Battery-backed `.sav` load/persist (write on exit + dirty interval).
+- [ ] Blargg harness passes: `cpu_instrs`, `mem_timing`, `mem_timing-2`.
+      Un-ignored (harness now loads through `System::load_cartridge`, real
+      MBC1 banking); still unverified — no test ROMs available in this
+      environment.
 
 ### M4 — End-to-end playable
 - [x] Timer (DIV/TIMA/TMA/TAC) wired to interrupts — done in M1, pulled

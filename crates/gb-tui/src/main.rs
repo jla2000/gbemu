@@ -6,8 +6,10 @@ mod input;
 mod log_ring;
 mod palette;
 mod render;
+mod save;
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
@@ -75,21 +77,51 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) 
     Ok(())
 }
 
+/// How often the run loop checks whether battery-backed cartridge RAM has
+/// been dirtied and needs writing out, on top of the always-on
+/// write-on-exit.
+const SAVE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
 fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     rom: Option<PathBuf>,
     palette: Palette,
 ) -> Result<()> {
-    let mut app = App::new(rom, palette);
+    let mut app = App::new(rom.clone(), palette);
+
+    if let Some(rom_path) = &rom {
+        match std::fs::read(rom_path) {
+            Ok(data) => {
+                for warning in app.system.load_cartridge(&data) {
+                    tracing::warn!("{warning}");
+                }
+                save::load(&mut app.system, rom_path);
+            }
+            Err(e) => tracing::error!("failed to read ROM {}: {e}", rom_path.display()),
+        }
+    }
+
+    let mut last_save_check = Instant::now();
 
     loop {
         terminal.draw(|frame| render::draw(frame, &app))?;
 
         input::handle_events(&mut app)?;
 
+        if let Some(rom_path) = &rom {
+            if last_save_check.elapsed() >= SAVE_CHECK_INTERVAL {
+                save::persist_if_dirty(&mut app.system, rom_path);
+                last_save_check = Instant::now();
+            }
+        }
+
         if app.should_quit {
             break;
         }
+    }
+
+    if let Some(rom_path) = &rom {
+        save::persist(&mut app.system, rom_path);
     }
 
     Ok(())

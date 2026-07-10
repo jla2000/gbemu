@@ -1,31 +1,34 @@
 //! Memory management unit: bus, memory map, I/O register dispatch.
 //!
-//! This is still the M1 stub for the general address space: a flat 64KB
-//! byte array addressable across the full `0x0000..=0xFFFF` range, enough
-//! for the CPU to fetch/execute instructions and for Blargg test ROMs to
-//! boot (no cartridge banking, no VRAM/OAM semantics yet). Real memory-map
-//! routing for those regions — cartridge ROM/RAM banking, VRAM/WRAM/OAM/
-//! HRAM regions, PPU/APU/Timer/Joypad register side effects — lands
-//! incrementally in M2/M3/M4/M5.
+//! The general address space is still a flat 64KB byte array for anything
+//! not routed elsewhere (WRAM/HRAM/echo RAM — no real behavioral
+//! difference from flat memory yet). Real routing exists for the regions
+//! that need actual side effects or backing storage beyond "a byte":
 //!
-//! `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07), the
-//! PPU register block (`LCDC`/`STAT`/`SCY`/`SCX`/`LY`/`LYC`/`BGP`/`OBP0`/
-//! `OBP1`/`WY`/`WX`, 0xFF40-0xFF4B minus the OAM DMA register at 0xFF46
-//! which lands with M4 DMA timing), and VRAM (0x8000-0x9FFF) + OAM
-//! (0xFE00-0xFE9F) are the exceptions: routed to a real [`Serial`],
-//! [`Timer`], and [`Ppu`] respectively, since the Blargg harness needs
-//! serial output capture, `instr_timing`/`mem_timing`(-2) self-time via a
-//! genuinely-running `TIMA` (pulled forward from M4 — see `SPEC.md`), and
-//! M2 needs real PPU register/VRAM/OAM storage for rendering. I/O-mapped
-//! components naturally live behind the bus that owns their address range —
-//! the MMU, not `System`, is where this and later APU/Joypad register
-//! wiring belong. `IF` (0xFF0F) is likewise real: interrupt dispatch, the
-//! serial-complete request, and the timer-overflow request all need a live
-//! IF byte, and it's just flat memory until other interrupt sources
-//! (Joypad) land.
+//! - `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07),
+//!   the PPU register block (`LCDC`/`STAT`/... 0xFF40-0xFF4B minus the OAM
+//!   DMA register at 0xFF46, which lands with M4 DMA timing), and VRAM
+//!   (0x8000-0x9FFF) + OAM (0xFE00-0xFE9F) — routed to a real [`Serial`],
+//!   [`Timer`], and [`Ppu`] respectively.
+//! - ROM (0x0000-0x7FFF) and external/cartridge RAM (0xA000-0xBFFF) — when
+//!   a [`Cartridge`] is installed via [`Mmu::load_cartridge`], routed
+//!   there for real bank switching; otherwise (no cartridge — e.g. the
+//!   Blargg harness and CPU-core unit tests using [`Mmu::load_rom`]) these
+//!   ranges keep falling through to flat memory, unbanked. The two loading
+//!   paths are intentionally separate: `load_rom` is fed tiny synthetic
+//!   byte sequences in many existing tests that wouldn't survive being
+//!   parsed as a cartridge header.
+//!
+//! I/O-mapped components naturally live behind the bus that owns their
+//! address range — the MMU, not `System`, is where this and later
+//! APU/Joypad register wiring belong. `IF` (0xFF0F) is likewise real:
+//! interrupt dispatch, the serial-complete request, and the timer-overflow
+//! request all need a live IF byte, and it's just flat memory until other
+//! interrupt sources (Joypad) land.
 //!
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
+use crate::cartridge::Cartridge;
 use crate::cpu::{Bus, IF_ADDR};
 use crate::ppu::{Ppu, OAM_BASE, STAT_INT_BIT, VBLANK_INT_BIT, VRAM_BASE};
 use crate::serial::{Serial, SERIAL_INT_BIT};
@@ -50,17 +53,21 @@ const WY_ADDR: u16 = 0xFF4A;
 const WX_ADDR: u16 = 0xFF4B;
 const VRAM_END: u16 = 0x9FFF;
 const OAM_END: u16 = 0xFE9F;
+const ROM_START: u16 = 0x0000;
+const ROM_END: u16 = 0x7FFF;
+const CART_RAM_START: u16 = 0xA000;
+const CART_RAM_END: u16 = 0xBFFF;
 
-/// Flat 64KB-addressable memory, plus the real serial port, timer, and PPU
-/// registers. Every other address hits the same backing array for every
-/// address — no banking, no region-specific behavior. Replaced by a real
-/// memory map as cartridge/APU/Joypad land.
+/// Flat 64KB-addressable memory, plus the real serial port, timer, PPU
+/// registers, and (once loaded) cartridge. Every other address hits the
+/// same backing array for every address — no region-specific behavior.
 #[derive(Clone)]
 pub struct Mmu {
     mem: [u8; 0x10000],
     pub serial: Serial,
     pub timer: Timer,
     pub ppu: Ppu,
+    pub cartridge: Option<Cartridge>,
 }
 
 impl std::fmt::Debug for Mmu {
@@ -70,6 +77,7 @@ impl std::fmt::Debug for Mmu {
             .field("serial", &self.serial)
             .field("timer", &self.timer)
             .field("ppu", &self.ppu)
+            .field("cartridge", &self.cartridge)
             .finish()
     }
 }
@@ -81,6 +89,7 @@ impl Default for Mmu {
             serial: Serial::new(),
             timer: Timer::new(),
             ppu: Ppu::new(),
+            cartridge: None,
         }
     }
 }
@@ -91,12 +100,25 @@ impl Mmu {
     }
 
     /// Load ROM bytes starting at address 0x0000, truncated to fit the
-    /// address space. No banking — a real cartridge/MBC replaces this in
-    /// M3; this exists only so Blargg test ROMs can boot against the M1
-    /// CPU core.
+    /// address space. No banking, and clears any installed cartridge —
+    /// this is the flat-memory loading path used by the Blargg harness
+    /// and CPU-core unit tests that feed it small synthetic byte
+    /// sequences no real cartridge header. See [`Mmu::load_cartridge`]
+    /// for real ROM files.
     pub fn load_rom(&mut self, data: &[u8]) {
+        self.cartridge = None;
         let len = data.len().min(self.mem.len());
         self.mem[..len].copy_from_slice(&data[..len]);
+    }
+
+    /// Parses `data` as a real cartridge image (header, MBC, banking —
+    /// see `cartridge/mod.rs`) and installs it, replacing any previous
+    /// cartridge or flat-loaded ROM. Returns non-fatal validation
+    /// warnings from header parsing.
+    pub fn load_cartridge(&mut self, data: &[u8]) -> Vec<String> {
+        let (cartridge, warnings) = Cartridge::from_rom_bytes(data);
+        self.cartridge = Some(cartridge);
+        warnings
     }
 
     /// Advances the timer by `t_cycles` T-cycles and folds a resulting
@@ -120,6 +142,15 @@ impl Mmu {
         }
         if self.ppu.take_stat_interrupt() {
             self.mem[IF_ADDR as usize] |= STAT_INT_BIT;
+        }
+    }
+
+    /// Advances the installed cartridge's MBC3 RTC (no-op for every other
+    /// MBC, or no cartridge). Called from `System::step` alongside the
+    /// timer/PPU.
+    pub fn step_cartridge(&mut self, t_cycles: u8) {
+        if let Some(cart) = &mut self.cartridge {
+            cart.step(t_cycles);
         }
     }
 }
@@ -146,6 +177,14 @@ impl Bus for Mmu {
             WX_ADDR => self.ppu.read_wx(),
             VRAM_BASE..=VRAM_END => self.ppu.read_vram(addr),
             OAM_BASE..=OAM_END => self.ppu.read_oam(addr),
+            ROM_START..=ROM_END => match &self.cartridge {
+                Some(cart) => cart.read_rom(addr),
+                None => self.mem[addr as usize],
+            },
+            CART_RAM_START..=CART_RAM_END => match &self.cartridge {
+                Some(cart) => cart.read_ram(addr),
+                None => self.mem[addr as usize],
+            },
             _ => self.mem[addr as usize],
         }
     }
@@ -176,6 +215,20 @@ impl Bus for Mmu {
             WX_ADDR => self.ppu.write_wx(val),
             VRAM_BASE..=VRAM_END => self.ppu.write_vram(addr, val),
             OAM_BASE..=OAM_END => self.ppu.write_oam(addr, val),
+            ROM_START..=ROM_END => {
+                if let Some(cart) = &mut self.cartridge {
+                    cart.write_rom_register(addr, val);
+                } else {
+                    self.mem[addr as usize] = val;
+                }
+            }
+            CART_RAM_START..=CART_RAM_END => {
+                if let Some(cart) = &mut self.cartridge {
+                    cart.write_ram(addr, val);
+                } else {
+                    self.mem[addr as usize] = val;
+                }
+            }
             _ => self.mem[addr as usize] = val,
         }
     }
@@ -228,6 +281,32 @@ mod tests {
         // LY is read-only; writes through the bus are ignored.
         mmu.write(LY_ADDR, 42);
         assert_eq!(mmu.read(LY_ADDR), 0);
+    }
+
+    #[test]
+    fn load_cartridge_routes_rom_and_ram_through_the_cartridge() {
+        // Minimal valid MBC1+RAM+BATTERY header: 4 ROM banks (64KB), 1 RAM
+        // bank (8KB, code 0x02).
+        let mut data = vec![0u8; 4 * 0x4000];
+        data[0x0147] = 0x03; // MBC1+RAM+BATTERY
+        data[0x0148] = 0x01; // 4 banks
+        data[0x0149] = 0x02; // 8KB RAM
+        data[3 * 0x4000] = 0xAB; // bank 3, offset 0
+        let checksum = (0x0134..0x014D)
+            .map(|a| data[a])
+            .fold(0u8, |acc, b| acc.wrapping_sub(b).wrapping_sub(1));
+        data[0x014D] = checksum;
+
+        let mut mmu = Mmu::new();
+        let warnings = mmu.load_cartridge(&data);
+        assert!(warnings.is_empty());
+
+        mmu.write(0x2000, 3); // select ROM bank 3
+        assert_eq!(mmu.read(0x4000), 0xAB);
+
+        mmu.write(0x0000, 0x0A); // enable RAM
+        mmu.write(0xA000, 0x77);
+        assert_eq!(mmu.read(0xA000), 0x77);
     }
 
     #[test]
