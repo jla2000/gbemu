@@ -235,10 +235,21 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 ### M4 — End-to-end playable
 - [x] Timer (DIV/TIMA/TMA/TAC) wired to interrupts — done in M1, pulled
       forward (see above).
-- [ ] Joypad register + keyboard input mapping.
-- [ ] OAM DMA + general DMA timing.
-- [ ] `oam_bug` Blargg test passes.
-- [ ] First playable commercial ROM, full framerate pacing.
+- [x] Joypad register + keyboard input mapping.
+- [x] OAM DMA + general DMA timing.
+- [ ] `oam_bug` Blargg test passes. Not expected to pass even once a ROM
+      is supplied: the actual OAM-corruption hardware quirk this ROM
+      exercises (certain 16-bit inc/dec/ldi/ldd opcodes corrupting OAM
+      when PC is 0xFE00-0xFEFF during Mode 2) isn't modeled — narrow
+      enough (real games don't rely on it) that it's being left as a
+      documented gap rather than implemented speculatively.
+- [ ] First playable commercial ROM, full framerate pacing. Framerate
+      pacing itself is implemented (wall-clock `run_frame()`-per-tick in
+      `gb-tui`'s main loop, interim until M5's audio-backpressure pacing)
+      and keyboard input is wired end-to-end, but "first playable
+      commercial ROM" is an experiential claim this environment can't
+      verify — no ROM file and no attached TTY to interactively drive the
+      real terminal UI.
 
 ### M5 — Audio
 - [ ] APU: pulse×2, wave, noise channels, frame sequencer.

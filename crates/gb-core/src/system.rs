@@ -3,19 +3,19 @@
 //!
 //! `step()` runs the CPU against the MMU's bus, including interrupt
 //! dispatch, the serial port's loopback output capture, the timer, the
-//! PPU's dot-accurate mode sequencer, and the cartridge's MBC3 RTC (a
-//! no-op for every other MBC). The serial port, timer, PPU registers, and
-//! cartridge live on the MMU (`system.mmu.serial`, `system.mmu.timer`,
-//! `system.mmu.ppu`, `system.mmu.cartridge`), not as separate `System`
-//! fields — they're either I/O-mapped register blocks (`SB`/`SC`,
-//! `DIV`/`TIMA`/`TMA`/`TAC`, `LCDC`/`STAT`/...) or address-range owners
-//! (ROM/cartridge RAM banking) that naturally belong behind the bus that
-//! owns their range, same as APU/Joypad registers will be once those land.
-//! APU stepping by elapsed T-cycles lands in M5.
+//! PPU's dot-accurate mode sequencer, OAM DMA, and the cartridge's MBC3
+//! RTC (a no-op for every other MBC). The serial port, timer, PPU
+//! registers, joypad, and cartridge live on the MMU (`system.mmu.serial`,
+//! `system.mmu.timer`, `system.mmu.ppu`, `system.mmu.joypad`,
+//! `system.mmu.cartridge`), not as separate `System` fields — they're
+//! either I/O-mapped register blocks (`SB`/`SC`, `DIV`/`TIMA`/`TMA`/`TAC`,
+//! `LCDC`/`STAT`/..., `JOYP`) or address-range owners (ROM/cartridge RAM
+//! banking) that naturally belong behind the bus that owns their range,
+//! same as APU registers will be once those land. APU stepping by elapsed
+//! T-cycles lands in M5.
 
 use crate::apu::Apu;
 use crate::cpu::Cpu;
-use crate::joypad::Joypad;
 use crate::mmu::Mmu;
 use crate::ppu::VBLANK_START_LINE;
 
@@ -25,7 +25,6 @@ pub struct System {
     pub cpu: Cpu,
     pub apu: Apu,
     pub mmu: Mmu,
-    pub joypad: Joypad,
 }
 
 impl System {
@@ -34,7 +33,6 @@ impl System {
             cpu: Cpu::new(),
             apu: Apu::new(),
             mmu: Mmu::new(),
-            joypad: Joypad::new(),
         }
     }
 
@@ -60,13 +58,15 @@ impl System {
     ///
     /// APU is still a placeholder (lands in M5) so it is not yet advanced
     /// here; the CPU already runs against the MMU's bus, and the
-    /// timer, PPU mode sequencer, and cartridge RTC already advance in
-    /// step with it.
+    /// timer, PPU mode sequencer, OAM DMA, and cartridge RTC already
+    /// advance in step with it.
     pub fn step(&mut self) -> u8 {
         let cycles = self.cpu.step(&mut self.mmu);
         self.mmu.step_timer(cycles);
         self.mmu.step_ppu(cycles);
         self.mmu.step_cartridge(cycles);
+        self.mmu.step_dma(cycles);
+        self.mmu.step_joypad();
         cycles
     }
 

@@ -1,9 +1,13 @@
 //! Top-level application state: run mode, loaded ROM, and the emulated
-//! system. Full running/paused/stepping state machine + debugger wiring
-//! lands in M6; this establishes the shape for M0.
+//! system. Full debugger-driven step/breakpoint transitions land in M6;
+//! for now `run_mode` just gates whether the main loop advances the
+//! emulator each frame.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
+use gb_core::joypad::Button;
 use gb_core::System;
 
 use crate::palette::Palette;
@@ -22,6 +26,11 @@ pub struct App {
     pub run_mode: RunMode,
     pub palette: Palette,
     pub should_quit: bool,
+    /// When each currently-held button was last confirmed pressed —
+    /// `input::handle_events` auto-releases a button once its entry goes
+    /// stale, since most terminals never send a discrete key-release
+    /// event. See that module for the timeout.
+    pub button_last_pressed: HashMap<Button, Instant>,
 }
 
 impl App {
@@ -32,6 +41,7 @@ impl App {
             run_mode: RunMode::Paused,
             palette,
             should_quit: false,
+            button_last_pressed: HashMap::new(),
         }
     }
 }

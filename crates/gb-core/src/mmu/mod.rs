@@ -6,10 +6,11 @@
 //! that need actual side effects or backing storage beyond "a byte":
 //!
 //! - `SB`/`SC` (0xFF01/0xFF02), `DIV`/`TIMA`/`TMA`/`TAC` (0xFF04-0xFF07),
-//!   the PPU register block (`LCDC`/`STAT`/... 0xFF40-0xFF4B minus the OAM
-//!   DMA register at 0xFF46, which lands with M4 DMA timing), and VRAM
-//!   (0x8000-0x9FFF) + OAM (0xFE00-0xFE9F) — routed to a real [`Serial`],
-//!   [`Timer`], and [`Ppu`] respectively.
+//!   `JOYP` (0xFF00), the PPU register block (`LCDC`/`STAT`/...
+//!   0xFF40-0xFF4B minus the OAM DMA register at 0xFF46, handled
+//!   separately below), and VRAM (0x8000-0x9FFF) + OAM (0xFE00-0xFE9F) —
+//!   routed to a real [`Serial`], [`Timer`], [`Joypad`], and [`Ppu`]
+//!   respectively.
 //! - ROM (0x0000-0x7FFF) and external/cartridge RAM (0xA000-0xBFFF) — when
 //!   a [`Cartridge`] is installed via [`Mmu::load_cartridge`], routed
 //!   there for real bank switching; otherwise (no cartridge — e.g. the
@@ -18,22 +19,30 @@
 //!   paths are intentionally separate: `load_rom` is fed tiny synthetic
 //!   byte sequences in many existing tests that wouldn't survive being
 //!   parsed as a cartridge header.
+//! - `DMA` (0xFF46) starts an OAM DMA transfer: 160 bytes copied from
+//!   `val * 0x100` into OAM over 160 M-cycles (640 T-cycles), one byte
+//!   every 4 T-cycles, paced by [`Mmu::step_dma`]. While active, the CPU
+//!   (i.e. anything going through the [`Bus`] impl below) can only reach
+//!   HRAM (0xFF80-0xFFFF); every other address reads `0xFF` and ignores
+//!   writes, matching real hardware's bus conflict. The DMA engine itself
+//!   reads through [`Mmu::dispatch_read`] directly, bypassing that gate.
 //!
 //! I/O-mapped components naturally live behind the bus that owns their
-//! address range — the MMU, not `System`, is where this and later
-//! APU/Joypad register wiring belong. `IF` (0xFF0F) is likewise real:
-//! interrupt dispatch, the serial-complete request, and the timer-overflow
-//! request all need a live IF byte, and it's just flat memory until other
-//! interrupt sources (Joypad) land.
+//! address range — the MMU, not `System`, is where this and later APU
+//! register wiring belong. `IF` (0xFF0F) is likewise real: interrupt
+//! dispatch, the serial-complete/timer-overflow/joypad requests all need a
+//! live IF byte, and it's just flat memory otherwise.
 //!
 //! Implements [`crate::cpu::Bus`] so the CPU can drive it directly.
 
 use crate::cartridge::Cartridge;
 use crate::cpu::{Bus, IF_ADDR};
+use crate::joypad::{Joypad, JOYPAD_INT_BIT};
 use crate::ppu::{Ppu, OAM_BASE, STAT_INT_BIT, VBLANK_INT_BIT, VRAM_BASE};
 use crate::serial::{Serial, SERIAL_INT_BIT};
 use crate::timer::{Timer, TIMER_INT_BIT};
 
+const JOYP_ADDR: u16 = 0xFF00;
 const SB_ADDR: u16 = 0xFF01;
 const SC_ADDR: u16 = 0xFF02;
 const DIV_ADDR: u16 = 0xFF04;
@@ -46,6 +55,7 @@ const SCY_ADDR: u16 = 0xFF42;
 const SCX_ADDR: u16 = 0xFF43;
 const LY_ADDR: u16 = 0xFF44;
 const LYC_ADDR: u16 = 0xFF45;
+const DMA_ADDR: u16 = 0xFF46;
 const BGP_ADDR: u16 = 0xFF47;
 const OBP0_ADDR: u16 = 0xFF48;
 const OBP1_ADDR: u16 = 0xFF49;
@@ -57,17 +67,30 @@ const ROM_START: u16 = 0x0000;
 const ROM_END: u16 = 0x7FFF;
 const CART_RAM_START: u16 = 0xA000;
 const CART_RAM_END: u16 = 0xBFFF;
+/// Accessible to the CPU even while an OAM DMA transfer is in progress.
+const HRAM_START: u16 = 0xFF80;
+const HRAM_END: u16 = 0xFFFF;
+
+const DMA_TRANSFER_BYTES: u16 = 160;
+const DMA_T_CYCLES_PER_BYTE: u32 = 4;
 
 /// Flat 64KB-addressable memory, plus the real serial port, timer, PPU
-/// registers, and (once loaded) cartridge. Every other address hits the
-/// same backing array for every address — no region-specific behavior.
+/// registers, joypad, and (once loaded) cartridge. Every other address
+/// hits the same backing array for every address — no region-specific
+/// behavior.
 #[derive(Clone)]
 pub struct Mmu {
     mem: [u8; 0x10000],
     pub serial: Serial,
     pub timer: Timer,
     pub ppu: Ppu,
+    pub joypad: Joypad,
     pub cartridge: Option<Cartridge>,
+
+    dma_active: bool,
+    dma_source_high: u8,
+    dma_progress: u16,
+    dma_cycle_accum: u32,
 }
 
 impl std::fmt::Debug for Mmu {
@@ -77,7 +100,9 @@ impl std::fmt::Debug for Mmu {
             .field("serial", &self.serial)
             .field("timer", &self.timer)
             .field("ppu", &self.ppu)
+            .field("joypad", &self.joypad)
             .field("cartridge", &self.cartridge)
+            .field("dma_active", &self.dma_active)
             .finish()
     }
 }
@@ -89,7 +114,12 @@ impl Default for Mmu {
             serial: Serial::new(),
             timer: Timer::new(),
             ppu: Ppu::new(),
+            joypad: Joypad::new(),
             cartridge: None,
+            dma_active: false,
+            dma_source_high: 0,
+            dma_progress: 0,
+            dma_cycle_accum: 0,
         }
     }
 }
@@ -153,11 +183,43 @@ impl Mmu {
             cart.step(t_cycles);
         }
     }
-}
 
-impl Bus for Mmu {
-    fn read(&mut self, addr: u16) -> u8 {
+    /// Folds any joypad interrupt request (raised the instant a button
+    /// state changes, from `self.joypad.set_button`/a `JOYP` write) into
+    /// `IF`. Called from `System::step` once per CPU instruction.
+    pub fn step_joypad(&mut self) {
+        if self.joypad.take_interrupt() {
+            self.mem[IF_ADDR as usize] |= JOYPAD_INT_BIT;
+        }
+    }
+
+    /// Advances an in-progress OAM DMA transfer by `t_cycles` T-cycles,
+    /// copying one byte every 4 T-cycles until all 160 are done. No-op
+    /// when no transfer is active. Called from `System::step` once per CPU
+    /// instruction.
+    pub fn step_dma(&mut self, t_cycles: u8) {
+        if !self.dma_active {
+            return;
+        }
+        self.dma_cycle_accum += t_cycles as u32;
+        while self.dma_active && self.dma_cycle_accum >= DMA_T_CYCLES_PER_BYTE {
+            self.dma_cycle_accum -= DMA_T_CYCLES_PER_BYTE;
+            let src = ((self.dma_source_high as u16) << 8) + self.dma_progress;
+            let byte = self.dispatch_read(src);
+            self.ppu.write_oam(OAM_BASE + self.dma_progress, byte);
+            self.dma_progress += 1;
+            if self.dma_progress >= DMA_TRANSFER_BYTES {
+                self.dma_active = false;
+            }
+        }
+    }
+
+    /// The actual per-address read dispatch, shared by the gated
+    /// `Bus::read` (the CPU's view) and the DMA engine (which has full bus
+    /// access regardless of an in-progress transfer).
+    fn dispatch_read(&self, addr: u16) -> u8 {
         match addr {
+            JOYP_ADDR => self.joypad.read_joyp(),
             SB_ADDR => self.serial.read_sb(),
             SC_ADDR => self.serial.read_sc(),
             DIV_ADDR => self.timer.read_div(),
@@ -170,6 +232,7 @@ impl Bus for Mmu {
             SCX_ADDR => self.ppu.read_scx(),
             LY_ADDR => self.ppu.read_ly(),
             LYC_ADDR => self.ppu.read_lyc(),
+            DMA_ADDR => self.dma_source_high,
             BGP_ADDR => self.ppu.read_bgp(),
             OBP0_ADDR => self.ppu.read_obp0(),
             OBP1_ADDR => self.ppu.read_obp1(),
@@ -189,8 +252,10 @@ impl Bus for Mmu {
         }
     }
 
-    fn write(&mut self, addr: u16, val: u8) {
+    /// The actual per-address write dispatch; see [`Mmu::dispatch_read`].
+    fn dispatch_write(&mut self, addr: u16, val: u8) {
         match addr {
+            JOYP_ADDR => self.joypad.write_joyp(val),
             SB_ADDR => self.serial.write_sb(val),
             SC_ADDR => {
                 self.serial.write_sc(val);
@@ -208,6 +273,12 @@ impl Bus for Mmu {
             SCX_ADDR => self.ppu.write_scx(val),
             LY_ADDR => self.ppu.write_ly(val),
             LYC_ADDR => self.ppu.write_lyc(val),
+            DMA_ADDR => {
+                self.dma_source_high = val;
+                self.dma_progress = 0;
+                self.dma_cycle_accum = 0;
+                self.dma_active = true;
+            }
             BGP_ADDR => self.ppu.write_bgp(val),
             OBP0_ADDR => self.ppu.write_obp0(val),
             OBP1_ADDR => self.ppu.write_obp1(val),
@@ -231,6 +302,22 @@ impl Bus for Mmu {
             }
             _ => self.mem[addr as usize] = val,
         }
+    }
+}
+
+impl Bus for Mmu {
+    fn read(&mut self, addr: u16) -> u8 {
+        if self.dma_active && !(HRAM_START..=HRAM_END).contains(&addr) {
+            return 0xFF;
+        }
+        self.dispatch_read(addr)
+    }
+
+    fn write(&mut self, addr: u16, val: u8) {
+        if self.dma_active && !(HRAM_START..=HRAM_END).contains(&addr) {
+            return;
+        }
+        self.dispatch_write(addr, val);
     }
 }
 
@@ -318,5 +405,51 @@ mod tests {
         let t = cpu.step(&mut mmu);
         assert_eq!(cpu.regs.a, 0x2A);
         assert_eq!(t, 8);
+    }
+
+    #[test]
+    fn joyp_is_routed_to_the_joypad_not_flat_memory() {
+        use crate::joypad::Button;
+        let mut mmu = Mmu::new();
+        mmu.write(JOYP_ADDR, 0x20); // select direction row
+        mmu.joypad.set_button(Button::Up, true);
+        assert_eq!(mmu.read(JOYP_ADDR) & 0x0F, 0b1011); // bit 2 (Up) low
+    }
+
+    #[test]
+    fn oam_dma_copies_160_bytes_over_640_t_cycles() {
+        let mut mmu = Mmu::new();
+        for i in 0..DMA_TRANSFER_BYTES {
+            mmu.mem[0xC000 + i as usize] = i as u8;
+        }
+        mmu.write(DMA_ADDR, 0xC0); // source = 0xC000
+
+        // Not done yet partway through (600 of 640 T-cycles).
+        mmu.step_dma(255);
+        mmu.step_dma(255);
+        mmu.step_dma(90);
+        assert_ne!(mmu.ppu.read_oam(OAM_BASE + 159), 159);
+
+        mmu.step_dma(40); // completes the remaining 40 T-cycles (10 bytes)
+        for i in 0..DMA_TRANSFER_BYTES {
+            assert_eq!(mmu.ppu.read_oam(OAM_BASE + i), i as u8);
+        }
+    }
+
+    #[test]
+    fn oam_dma_blocks_cpu_access_to_everything_but_hram() {
+        let mut mmu = Mmu::new();
+        mmu.write(0xC000, 0x11); // before DMA: ordinary WRAM write works
+        mmu.write(DMA_ADDR, 0xC0);
+
+        mmu.write(0xC000, 0x22); // blocked: not HRAM
+        assert_eq!(mmu.read(0xC000), 0xFF); // reads as open bus too
+        mmu.write(0xFF80, 0x33); // HRAM stays accessible
+        assert_eq!(mmu.read(0xFF80), 0x33);
+
+        mmu.step_dma(255);
+        mmu.step_dma(255);
+        mmu.step_dma(130); // finish the transfer (640 T-cycles total)
+        assert_eq!(mmu.read(0xC000), 0x11); // unblocked; the 0x22 write never landed
     }
 }
