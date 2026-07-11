@@ -108,14 +108,19 @@ gbemu/
 
 ## Debug UI
 
-- Panels (tabbed or docked): **Disassembly**, **Registers/Flags**, **Memory
-  viewer** (hex dump, scrollable, jump-to-address), **VRAM/Tile/OAM viewer**
-  (BG tile map, tile data, sprite list), **Log panel**.
+- **Always-on status sidebar** (M8): CPU registers/flags, key PPU/Timer/
+  Cartridge/APU state render unconditionally next to the video area — no
+  toggle needed to see what the machine is doing right now.
+- Heavier panels (togglable via F12, tabbed via Tab): **Disassembly**,
+  **Memory viewer** (hex dump, scrollable, jump-to-address), **VRAM/Tile/
+  OAM viewer** (BG tile map, tile data, sprite list), **Log panel**. (The
+  standalone **Registers/Flags** panel from M6 is superseded by the M8
+  sidebar, which shows the same data unconditionally — see M8.)
 - Controls: pause/resume, step instruction, step frame, run-to-breakpoint,
   set/clear breakpoint (PC address or memory read/write watch).
 - Keybinds: arrows + Z/X/Enter/RShift = D-pad/A/B/Start/Select. Space/N =
-  step, F5 = run/continue, Tab = cycle panels, F12/`~` = toggle debug
-  overlay.
+  step, F5 = run/continue, Tab = cycle panels, F12/`~` = toggle the
+  heavier panel set (the status sidebar itself is never hidden).
 - Logging: `tracing` + a custom `Layer` writing into an in-memory ring
   buffer, rendered by the log panel widget. No file output — stdout/stderr
   are owned by the TUI.
@@ -344,3 +349,78 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       plus its own render test.
 - [x] Palette selection flag (M2's `--palette`), README with test-ROM
       fetch instructions (`README.md`, `roms/README.md`).
+
+### M8 — Always-on status sidebar & richer debug UI
+Today `App::debug_overlay` (F12) gates *all* debug info, registers
+included — you can't see what the CPU is doing without dedicating half
+the terminal to a tabbed panel. This milestone splits that: a compact
+status sidebar with CPU/PPU/Timer/Cartridge/APU state renders
+unconditionally, and the heavier panels (disassembly, memory hex dump,
+VRAM viewer, log) stay behind the existing F12 toggle since they need
+more space and aren't relevant every frame. Also an opportunity for
+some visual polish beyond plain hex dumps — decoded flags, color-coding,
+change highlighting — since "interesting" was explicitly asked for, not
+just "more."
+
+- [ ] New always-on `StatusSidebarWidget` (new module, e.g.
+      `gb-tui/src/debug/status.rs`), rendered unconditionally beside the
+      video area regardless of `App::debug_overlay`. Sections, all backed
+      by data already exposed publicly (no `gb-core` changes needed for
+      this item):
+      - **CPU**: AF/BC/DE/HL/SP/PC, Z/N/H/C flags, IME, HALT/STOP —
+        today's `debug::registers::lines` content, relocated here.
+      - **PPU**: LCDC, STAT (raw + decoded mode 0-3), LY/LYC, SCX/SCY/
+        WX/WY, BGP/OBP0/OBP1 — all via `Ppu`'s existing `read_*` methods.
+      - **Timer**: DIV/TIMA/TMA/TAC via `Timer`'s existing `read_*`
+        methods.
+      - **Joypad**: currently-held buttons, from `App::button_last_pressed`
+        (already tracked, just not displayed).
+      - **Cartridge**: title, MBC type, ROM/RAM bank *counts* — all on
+        `Cartridge::header` (`pub struct Header`), already public.
+      - **APU**: per-channel on/off, decoded from the low 4 bits of
+        `Apu::read_nr52()` (already public); NR50/NR51 summary
+        (master volume / panning) via `read_nr50`/`read_nr51`.
+      - **Run state**: RUNNING/PAUSED + breakpoint/watchpoint counts,
+        moved up from the status line (today's
+        `debug::overlay::status_summary`) into the sidebar header so
+        it's grouped with the rest of the always-on info.
+- [ ] Layout rework in `render/layout.rs`: video (160x72) + sidebar
+      (~32-34 cols, exact width TBD once section content is drafted)
+      share the top row unconditionally. The existing F12-toggled
+      `DebugOverlayWidget` (disassembly/memory/vram/log, still
+      Tab-cycled) moves from *beside* the video to a full-width panel
+      *below* it, shown only when `debug_overlay` is on — avoids
+      requiring an even-wider terminal just to toggle it.
+      `layout::MIN_COLS` becomes `SCREEN_COLS + SIDEBAR_COLS` (sidebar
+      space is unconditional now, not gated on `debug_overlay`);
+      `MIN_ROWS` unchanged when the overlay is off, grows when it's on
+      (same idea as today's horizontal split, just reoriented to
+      vertical).
+- [ ] Retire the standalone `DebugPanel::Registers` tab (superseded by
+      the sidebar) from `App`'s panel-cycling; `debug::registers` module
+      content moves into the sidebar rather than staying duplicated in
+      both places.
+- [ ] Decode `LCDC`/`STAT` into readable flags alongside the raw hex
+      (e.g. `LCDC F3  LCD:ON BG:ON WIN:OFF OBJ:ON(8x8) MAP:9800
+      TILE:8000`), rather than just the raw byte value — same spirit as
+      today's `AF: 1234 (A:12 F:34)` register-pair decoding.
+- [ ] Color-code sidebar section titles/borders by category (CPU/PPU/
+      Timer/Cartridge/APU each a distinct, consistent color) so it reads
+      at a glance instead of as a wall of undifferentiated hex.
+- [ ] Changed-value highlighting: `App` keeps the previous frame's CPU
+      register snapshot; the sidebar renders any register that changed
+      since the last redraw in a highlight color for that frame, making
+      execution activity visible without single-stepping.
+- [ ] Update tests that assumed the old layout/panel set: `render::
+      layout`'s resize-prompt test (new `MIN_COLS`), `main.rs`'s
+      full-render-pipeline smoke test (drop `DebugPanel::Registers` from
+      the panels it iterates, add a sidebar render pass), `debug::
+      overlay`'s `status_summary` test (move/rename if its output moves
+      into the sidebar). Update `SPEC.md`'s "Debug UI" section and
+      affected module doc comments to match.
+- [ ] Stretch, deferred unless time allows — both need small new
+      `gb-core` accessors, not exposed today: a live MBC bank indicator
+      (current ROM/RAM bank in use; each MBC's bank-select state is
+      private) and a per-APU-channel output-level meter
+      (`ratatui::widgets::Sparkline`/`Gauge`; channels don't expose live
+      output amplitude, only on/off).
