@@ -16,7 +16,7 @@
 
 use crate::cpu::Cpu;
 use crate::mmu::Mmu;
-use crate::ppu::VBLANK_START_LINE;
+use crate::ppu::DOTS_PER_FRAME;
 
 /// Top-level emulated system.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -121,27 +121,29 @@ impl System {
         cycles
     }
 
-    /// Run until the PPU signals VBlank start (`LY` reaches
-    /// [`VBLANK_START_LINE`]), i.e. one full frame. Returns immediately if
-    /// the LCD is off, since a disabled LCD never reaches VBlank.
+    /// Runs one GB frame's worth of T-cycles ([`DOTS_PER_FRAME`], ~70224 —
+    /// the real DMG's dots/frame), regardless of the PPU's LCD-enabled
+    /// state.
     ///
-    /// No framebuffer is produced yet (BG/window/sprite fetch lands later
-    /// in M2) — this only drives the mode sequencer far enough for
-    /// interrupt-driven test ROMs and the eventual render loop to rely on.
+    /// This used to instead step until `LY` crossed into VBlank, bailing
+    /// out immediately (without stepping the CPU at all) if the LCD was
+    /// off, on the theory that a disabled LCD never reaches VBlank so
+    /// waiting for one would spin forever. But the CPU doesn't stop just
+    /// because LCDC's enable bit is off on real hardware, and it's
+    /// completely ordinary for a ROM to disable the LCD briefly (e.g. to
+    /// set up VRAM before turning it back on) — game boot sequences and
+    /// test ROMs like `dmg-acid2` both do this. The old logic froze the
+    /// whole system the instant that happened: once the LCD was off,
+    /// every subsequent `run_frame` call would see it still off and
+    /// refuse to step even once, forever. Pacing off a fixed cycle budget
+    /// instead sidesteps that entirely — the CPU always keeps running,
+    /// and the PPU's own mode sequencer (driven by `step_ppu` every
+    /// instruction, independent of this loop) is what actually tracks
+    /// `LY`/VBlank internally, whether or not the LCD is currently on.
     pub fn run_frame(&mut self) {
-        if !self.mmu.ppu.lcd_enabled() {
-            return;
-        }
-        loop {
-            let ly_before = self.mmu.ppu.read_ly();
-            self.step();
-            let ly_after = self.mmu.ppu.read_ly();
-            if ly_before != VBLANK_START_LINE && ly_after == VBLANK_START_LINE {
-                break;
-            }
-            if !self.mmu.ppu.lcd_enabled() {
-                break;
-            }
+        let mut dots_run: u32 = 0;
+        while dots_run < DOTS_PER_FRAME {
+            dots_run += self.step() as u32;
         }
     }
 }
@@ -164,22 +166,30 @@ mod tests {
     }
 
     #[test]
-    fn run_frame_returns_immediately_when_lcd_is_off() {
+    fn run_frame_keeps_stepping_the_cpu_even_while_the_lcd_is_off() {
+        // Regression test: run_frame used to bail out without stepping the
+        // CPU at all whenever the LCD was off, which froze the system
+        // forever the instant any ROM disabled the LCD (completely
+        // ordinary -- e.g. to set up VRAM before turning it back on).
         let mut sys = System::new();
-        sys.load_rom(&[0xC3, 0x00, 0x00]); // JP 0x0000 (infinite loop)
+        sys.load_rom(&[0x3C, 0xC3, 0x00, 0x00]); // loop: INC A; JP 0x0000
         sys.run_frame();
-        assert_eq!(sys.mmu.ppu.read_ly(), 0); // never ticked
+        assert_eq!(sys.mmu.ppu.read_ly(), 0); // PPU itself stays frozen (LCD off)...
+        assert_ne!(sys.cpu.regs.a, 0); // ...but the CPU kept looping and incrementing A
     }
 
     #[test]
-    fn run_frame_stops_at_vblank_and_requests_the_interrupt() {
+    fn run_frame_runs_exactly_one_frames_worth_of_dots_and_requests_vblank() {
         let mut sys = System::new();
-        sys.load_rom(&[0xC3, 0x00, 0x00]); // JP 0x0000 (infinite loop)
+        sys.load_rom(&[0xC3, 0x00, 0x00]); // JP 0x0000 (infinite loop, 16 T-cycles/iter)
         sys.mmu.ppu.write_lcdc(0x80); // LCD on
         sys.run_frame();
-        assert_eq!(sys.mmu.ppu.read_ly(), VBLANK_START_LINE);
-        assert_eq!(sys.mmu.ppu.read_stat() & 0b11, 1); // Mode 1 (VBlank)
+        // DOTS_PER_FRAME (70224) is an exact multiple of this loop's 16
+        // T-cycles/iteration, so run_frame lands exactly back at the start
+        // of the next frame (LY=0, Mode 2) rather than overshooting.
+        assert_eq!(sys.mmu.ppu.read_ly(), 0);
+        assert_eq!(sys.mmu.ppu.read_stat() & 0b11, 2); // Mode 2 (OAM) of the next frame
         use crate::cpu::Bus;
-        assert_eq!(sys.mmu.read(0xFF0F) & 0x01, 0x01); // VBlank IF bit set
+        assert_eq!(sys.mmu.read(0xFF0F) & 0x01, 0x01); // VBlank IF bit set during the run
     }
 }

@@ -216,8 +216,28 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 - [x] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
       OBJ-OBJ priority (X-coord + OAM index).
 - [x] Half-block video widget in `gb-tui`, truecolor palette.
-- [ ] Passes `dmg-acid2` and Mealybug Tearoom suite. ROMs not yet fetched
-      into this environment.
+- [x] Passes `dmg-acid2` (`roms/dmg-acid2/dmg-acid2.gb`, fetched from
+      <https://github.com/mattcurrie/dmg-acid2/releases/tag/v1.0>).
+      Verified with a new automated test, `tests/dmg_acid2` — renders
+      headlessly for 60 frames, then checks the resulting framebuffer's
+      CRC32 against the one computed from the project's official
+      `reference-dmg.png`; byte-for-byte exact match, 0/23040 pixels
+      differ. Finding this required its own fix: `System::run_frame` (and
+      the TUI's `run_frame_checking_breakpoints`) used to stop dead the
+      instant the LCD was disabled mid-frame — completely normal ROM
+      behavior (disable LCD, set up VRAM, re-enable it) that `dmg-acid2`
+      itself does — because every subsequent call would see the LCD still
+      off and refuse to step the CPU even once, forever. Now paced by a
+      fixed per-frame dot budget (`ppu::DOTS_PER_FRAME`) instead of
+      watching for a VBlank edge, so the CPU always keeps running
+      regardless of LCD state.
+- [ ] Passes the Mealybug Tearoom suite. ROMs fetched (30 prebuilt `.gb`
+      files in `roms/mealybug/`, from
+      <https://github.com/mattcurrie/mealybug-tearoom-tests>'s bundled
+      `mealybug-tearoom-tests.zip`), but no automated harness/reference
+      images wired up yet (each of the 30 tests needs its own expected
+      screenshot from that repo's `expected/` directory) — left as a
+      follow-up given the size of that harness relative to this pass.
 - [ ] Blargg harness passes: `halt_bug`. Verified failing (ROM now present
       in `roms/blargg/halt_bug.gb`) — not a hang/timeout, a real reported
       failure; root cause not yet diagnosed (no bundled source for this

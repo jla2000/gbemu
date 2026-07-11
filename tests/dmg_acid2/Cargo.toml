@@ -1,0 +1,8 @@
+[package]
+name = "gbemu-dmg-acid2-test"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gb-core = { path = "../../crates/gb-core" }

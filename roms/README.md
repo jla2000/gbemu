@@ -37,21 +37,29 @@ cargo test -p gbemu-blargg-tests cpu_instrs -- --nocapture
 
 ## Mealybug Tearoom tests (PPU, mid-scanline register writes)
 
-Source: <https://github.com/mattcurrie/mealybug-tearoom-tests> — requires
-building with [RGBDS](https://rgbds.gbdev.io/) (`make` in that repo);
-reference screenshots ship in its `expected/` directory.
+Source: <https://github.com/mattcurrie/mealybug-tearoom-tests> — the repo
+root's `mealybug-tearoom-tests.zip` has all 30 prebuilt `.gb` files (no
+RGBDS build needed); reference screenshots ship in its `expected/`
+directory. Extract into `roms/mealybug/`. No automated harness reads
+these yet — see the M2 checkbox in `../SPEC.md`.
 
 ## dmg-acid2 (PPU rendering correctness)
 
-Source: <https://github.com/mattcurrie/dmg-acid2> — a prebuilt
-`dmg-acid2.gb` is attached to the repo's GitHub releases, or build it
-yourself with RGBDS.
+Source: <https://github.com/mattcurrie/dmg-acid2/releases/tag/v1.0> — a
+prebuilt `dmg-acid2.gb` is attached to the release (also `img/
+reference-dmg.png`, the expected output). Fetch into
+`roms/dmg-acid2/dmg-acid2.gb`, then:
+
+```
+cargo test -p gbemu-dmg-acid2-test -- --nocapture
+```
 
 ## Status as of this environment
 
-None of the above are present here — this sandbox has no way to fetch
-them, so the Blargg/Mealybug/acid2 checkboxes in `SPEC.md` that read
-"unverified" are exactly that: implemented against the documented
-hardware behavior, structurally un-blocked, but not run against a real
-ROM. Supplying them and re-running `cargo test --workspace` is how those
-get checked off for real.
+Blargg's ROMs, `dmg-acid2`, and the Mealybug ROMs are all present in this
+environment as of the M2/M3 pass that verified them (see `SPEC.md`) —
+fetched directly from GitHub, which this sandbox does in fact have
+network access to (an earlier version of this note claimed otherwise;
+that was never re-checked until then). `cargo test --workspace` picks
+them up automatically; `roms/` stays gitignored regardless, so a fresh
+checkout still needs this directory populated by hand.

@@ -66,9 +66,14 @@ const STAT_COINCIDENCE_BIT: u8 = 0b0000_0100;
 const MODE2_DOTS: u32 = 80;
 const SCANLINE_DOTS: u32 = 456;
 const LINES_PER_FRAME: u8 = 154;
-/// `LY` value at which Mode 1 (VBlank) begins; a frame is "done" once `LY`
-/// reaches this. Exposed for `System::run_frame`'s VBlank-edge loop.
+/// `LY` value at which Mode 1 (VBlank) begins.
 pub const VBLANK_START_LINE: u8 = 144;
+/// Total T-cycles ("dots") in one full DMG frame (`SCANLINE_DOTS *
+/// LINES_PER_FRAME`). `System::run_frame`/the TUI's frame loop pace
+/// themselves by this fixed budget rather than watching for a VBlank edge
+/// — see `System::run_frame`'s doc comment for why a disabled LCD makes
+/// edge-watching unsafe.
+pub const DOTS_PER_FRAME: u32 = SCANLINE_DOTS * LINES_PER_FRAME as u32;
 
 /// Sprites (OBJ) per scanline real hardware selects, in OAM order, before
 /// applying X-coordinate priority.
@@ -206,9 +211,7 @@ impl Ppu {
         self.lcdc & LCDC_ENABLE_BIT != 0
     }
 
-    /// Whether the LCD is currently on (`LCDC` bit 7). Exposed so
-    /// `System::run_frame` can avoid spinning forever waiting for a VBlank
-    /// that a disabled LCD will never signal.
+    /// Whether the LCD is currently on (`LCDC` bit 7).
     pub fn lcd_enabled(&self) -> bool {
         self.enabled()
     }

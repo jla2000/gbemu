@@ -105,39 +105,32 @@ impl App {
         self.system.step();
     }
 
-    /// Runs one GB frame like `System::run_frame`, but stops early
-    /// (returning `true` and setting `run_mode` back to `Paused`) if a PC
-    /// breakpoint or watchpoint is hit. This duplicates `run_frame`'s
-    /// VBlank-edge loop rather than adding breakpoint awareness to
-    /// `gb-core` -- breakpoints are a debugger/frontend concept, not
-    /// something the emulation core itself needs to know about.
+    /// Runs one GB frame's worth of T-cycles like `System::run_frame`
+    /// (paced by a fixed dot budget, not a VBlank edge -- see that
+    /// function's doc comment for why watching for an edge is unsafe when
+    /// the LCD can be disabled mid-frame), but stops early (returning
+    /// `true` and setting `run_mode` back to `Paused`) if a PC breakpoint
+    /// or watchpoint is hit. This duplicates `run_frame`'s loop rather
+    /// than adding breakpoint awareness to `gb-core` -- breakpoints are a
+    /// debugger/frontend concept, not something the emulation core itself
+    /// needs to know about.
     pub fn run_frame_checking_breakpoints(&mut self) -> bool {
-        if !self.system.mmu.ppu.lcd_enabled() {
-            return false;
-        }
-        loop {
+        let mut dots_run: u32 = 0;
+        while dots_run < gb_core::ppu::DOTS_PER_FRAME {
             let pc = self.system.cpu.regs.pc;
             if self.breakpoints.should_break_at(pc) {
                 self.run_mode = RunMode::Paused;
                 return true;
             }
 
-            let ly_before = self.system.mmu.ppu.read_ly();
-            self.system.step();
+            dots_run += self.system.step() as u32;
 
             if self.breakpoints.check_watchpoints(&mut self.system.mmu) {
                 self.run_mode = RunMode::Paused;
                 return true;
             }
-
-            let ly_after = self.system.mmu.ppu.read_ly();
-            if ly_before != gb_core::ppu::VBLANK_START_LINE && ly_after == gb_core::ppu::VBLANK_START_LINE {
-                return false;
-            }
-            if !self.system.mmu.ppu.lcd_enabled() {
-                return false;
-            }
         }
+        false
     }
 }
 
@@ -190,11 +183,27 @@ mod tests {
     #[test]
     fn run_frame_checking_breakpoints_completes_a_full_frame_without_hits() {
         let mut app = App::new(None, Palette::Classic);
-        app.system.load_rom(&[0xC3, 0x00, 0x00]); // JP 0x0000 (infinite loop)
+        app.system.load_rom(&[0xC3, 0x00, 0x00]); // JP 0x0000 (infinite loop, 16 T-cycles/iter)
         app.system.mmu.ppu.write_lcdc(0x80);
 
         let hit = app.run_frame_checking_breakpoints();
         assert!(!hit);
-        assert_eq!(app.system.mmu.ppu.read_ly(), gb_core::ppu::VBLANK_START_LINE);
+        // DOTS_PER_FRAME is an exact multiple of this loop's 16
+        // T-cycles/iteration, so it lands back at the start of the next
+        // frame (LY=0) rather than stopping mid-VBlank.
+        assert_eq!(app.system.mmu.ppu.read_ly(), 0);
+    }
+
+    #[test]
+    fn run_frame_checking_breakpoints_keeps_stepping_while_the_lcd_is_off() {
+        // Regression test: this used to bail out without stepping the CPU
+        // at all whenever the LCD was off, freezing the debugger's
+        // run/continue forever the instant a ROM disabled the LCD.
+        let mut app = App::new(None, Palette::Classic);
+        app.system.load_rom(&[0x3C, 0xC3, 0x00, 0x00]); // loop: INC A; JP 0x0000
+
+        let hit = app.run_frame_checking_breakpoints();
+        assert!(!hit);
+        assert_ne!(app.system.cpu.regs.a, 0);
     }
 }

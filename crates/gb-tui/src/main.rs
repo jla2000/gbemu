@@ -115,13 +115,13 @@ fn restore_terminal(
 /// write-on-exit.
 const SAVE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
-/// DMG refresh rate: 70224 dots/frame at 4.194304 MHz == ~59.7275 Hz.
-/// Fallback pacing when no audio output device is available (this
+/// DMG refresh rate: `DOTS_PER_FRAME` dots/frame at 4.194304 MHz == ~59.7275
+/// Hz. Fallback pacing when no audio output device is available (this
 /// sandbox's usual case) — otherwise nothing drains the APU's ring
 /// buffer, so the buffer-backpressure pacing below would just see it
 /// permanently full instead of actually tracking real time.
 fn frame_duration() -> Duration {
-    Duration::from_secs_f64(70224.0 / 4_194_304.0)
+    Duration::from_secs_f64(gb_core::ppu::DOTS_PER_FRAME as f64 / 4_194_304.0)
 }
 
 /// How long to sleep between checks while waiting for the audio ring
