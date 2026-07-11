@@ -11,6 +11,7 @@ pub mod cpu;
 pub mod joypad;
 pub mod mmu;
 pub mod ppu;
+pub mod savestate;
 pub mod serial;
 pub mod system;
 pub mod timer;

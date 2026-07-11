@@ -12,7 +12,7 @@ pub const FLAG_C: u8 = 0b0001_0000;
 /// SM83 register set: A/B/C/D/E/H/L + flags (F), SP, PC.
 ///
 /// `F`'s low nibble is always zero — enforced by [`Registers::set_f`].
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Registers {
     pub a: u8,
     pub f: u8,

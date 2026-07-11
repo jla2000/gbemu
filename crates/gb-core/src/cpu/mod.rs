@@ -26,7 +26,7 @@ pub(crate) fn interrupt_pending(bus: &mut impl Bus) -> bool {
 }
 
 /// SM83 CPU state: registers + IME/HALT/STOP flags.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Cpu {
     pub regs: Registers,
     /// Interrupt Master Enable.

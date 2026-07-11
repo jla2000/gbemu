@@ -44,7 +44,7 @@ pub fn run_blargg_rom(rom_path: &Path) -> Outcome {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", rom_path.display()));
 
     let mut sys = System::new();
-    sys.load_rom(&data);
+    sys.load_cartridge(&data);
 
     let mut cycles: u64 = 0;
     while cycles < CYCLE_BUDGET {

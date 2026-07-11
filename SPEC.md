@@ -212,45 +212,89 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 
 ### M2 — PPU
 - [x] LCDC/STAT/SCX/SCY/WX/WY/BGP/OBP0/OBP1 registers.
-- [ ] Dot-accurate mode sequencing (2→3→0 ×144, then Mode 1 ×10 lines).
-- [ ] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
+- [x] Dot-accurate mode sequencing (2→3→0 ×144, then Mode 1 ×10 lines).
+- [x] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
       OBJ-OBJ priority (X-coord + OAM index).
-- [ ] Half-block video widget in `gb-tui`, truecolor palette.
+- [x] Half-block video widget in `gb-tui`, truecolor palette.
 - [ ] Passes `dmg-acid2` and Mealybug Tearoom suite.
-- [ ] Blargg harness passes: `halt_bug` (needs `LY`/VBlank polling — see M1).
+- [ ] Blargg harness passes: `halt_bug`. Un-ignored (no longer needs
+      `LY`/VBlank polling); still unverified — no test ROM available in
+      this environment. Fetch `roms/blargg/halt_bug.gb` and run
+      `cargo test -p gbemu-blargg-tests halt_bug` to check this off.
 
 ### M3 — Cartridges
-- [ ] ROM header parsing + validation warnings.
-- [ ] MBC0, MBC1 (+ banking mode quirk), MBC2 (nibble RAM), MBC3 (+RTC
+- [x] ROM header parsing + validation warnings.
+- [x] MBC0, MBC1 (+ banking mode quirk), MBC2 (nibble RAM), MBC3 (+RTC
       latch), MBC5.
-- [ ] Battery-backed `.sav` load/persist (write on exit + dirty interval).
-- [ ] Blargg harness passes: `cpu_instrs`, `mem_timing`, `mem_timing-2`
-      (need MBC1 ROM bank switching — see M1).
+- [x] Battery-backed `.sav` load/persist (write on exit + dirty interval).
+- [ ] Blargg harness passes: `cpu_instrs`, `mem_timing`, `mem_timing-2`.
+      Un-ignored (harness now loads through `System::load_cartridge`, real
+      MBC1 banking); still unverified — no test ROMs available in this
+      environment.
 
 ### M4 — End-to-end playable
 - [x] Timer (DIV/TIMA/TMA/TAC) wired to interrupts — done in M1, pulled
       forward (see above).
-- [ ] Joypad register + keyboard input mapping.
-- [ ] OAM DMA + general DMA timing.
-- [ ] `oam_bug` Blargg test passes.
-- [ ] First playable commercial ROM, full framerate pacing.
+- [x] Joypad register + keyboard input mapping.
+- [x] OAM DMA + general DMA timing.
+- [ ] `oam_bug` Blargg test passes. Not expected to pass even once a ROM
+      is supplied: the actual OAM-corruption hardware quirk this ROM
+      exercises (certain 16-bit inc/dec/ldi/ldd opcodes corrupting OAM
+      when PC is 0xFE00-0xFEFF during Mode 2) isn't modeled — narrow
+      enough (real games don't rely on it) that it's being left as a
+      documented gap rather than implemented speculatively.
+- [ ] First playable commercial ROM, full framerate pacing. Framerate
+      pacing is implemented (audio-buffer-backpressure pacing when an
+      output device is available, wall-clock `run_frame()`-per-tick
+      fallback otherwise — see M5) and keyboard input is wired
+      end-to-end, but "first playable commercial ROM" is an experiential
+      claim this environment can't verify — no ROM file and no attached
+      TTY to interactively drive the real terminal UI.
 
 ### M5 — Audio
-- [ ] APU: pulse×2, wave, noise channels, frame sequencer.
-- [ ] Mixer → ring buffer → `cpal` output stream.
-- [ ] Emulation pacing driven by audio buffer backpressure.
-- [ ] `dmg_sound` Blargg tests pass.
+- [x] APU: pulse×2, wave, noise channels, frame sequencer.
+- [x] Mixer → ring buffer → `cpal` output stream.
+- [x] Emulation pacing driven by audio buffer backpressure (falls back to
+      wall-clock pacing when no output device is available — this
+      sandbox's usual case, verified: `cpal`'s ALSA backend finds no real
+      card here).
+- [ ] `dmg_sound` Blargg tests pass. Test file added; unverified — no ROM
+      available in this environment. A couple of specific subtests
+      (zombie-mode envelope glitch, sweep's second overflow check) aren't
+      expected to pass even with a ROM — documented gaps in
+      `gb_core::apu`'s module doc, narrow enough not to be worth chasing
+      without a way to verify against them.
 
 ### M6 — Debugger
-- [ ] Disassembly panel (live, centered on PC).
-- [ ] Registers/flags panel.
-- [ ] Memory viewer (hex, scroll, jump-to-address).
-- [ ] VRAM/tile/BG-map/OAM viewer.
-- [ ] Breakpoints (PC + memory watch) and step/continue/step-frame controls.
-- [ ] Log panel wired to `tracing` ring buffer.
-- [ ] Panel layout + keybinds (Tab cycle, F12 toggle overlay).
+- [x] Disassembly panel (live, centered on PC). "Centered" is approximated
+      as PC-and-forward (marked `->`) rather than truly centered — see
+      the doc comment on `debug::overlay::disassembly_lines` for why
+      showing bytes *before* PC is ambiguous for a variable-length
+      instruction stream without a known-good alignment point.
+- [x] Registers/flags panel.
+- [x] Memory viewer (hex, scroll, jump-to-address via `App::mem_viewer_addr`).
+- [x] VRAM/tile/BG-map/OAM viewer.
+- [x] Breakpoints (PC + memory watch) and step/continue/step-frame controls.
+      Watchpoints are value-change watches, not true read/write-access
+      traps (would need instrumenting every `gb-core` `Bus` call) — see
+      `debug::breakpoints`'s doc comment.
+- [x] Log panel wired to `tracing` ring buffer.
+- [x] Panel layout + keybinds (Tab cycle, F12 toggle overlay, plus
+      Space/N/F/F5 step-instruction/step-frame/run-pause and B/W
+      breakpoint/watchpoint toggles).
 
 ### M7 — Save states & polish
-- [ ] Full save-state serialization (`serde`+`bincode`), load/save hotkeys.
-- [ ] Resize-prompt overlay + live resize handling.
-- [ ] Palette selection flag, README with test-ROM fetch instructions.
+- [x] Full save-state serialization (`serde`+`bincode`), load/save hotkeys
+      (F2/F3, see `gb-tui::save::quicksave`/`quickload`). Along the way,
+      switched `Mmu`'s and `Ppu`'s large fixed-size byte arrays to boxed
+      slices (`Box<[u8]>`) — besides avoiding large stack-resident copies
+      generally, this fixed a real stack overflow in debug builds when
+      deserializing a save state on a thread with a constrained stack
+      (e.g. `cargo test`'s default worker threads); see the doc comment
+      on `Mmu::mem`.
+- [x] Resize-prompt overlay + live resize handling — already covered by
+      M0's `layout::draw` (recomputes from `frame.area()` every redraw,
+      so `ratatui`/`crossterm` picking up a terminal resize just works)
+      plus its own render test.
+- [x] Palette selection flag (M2's `--palette`), README with test-ROM
+      fetch instructions (`README.md`, `roms/README.md`).

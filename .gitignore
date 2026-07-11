@@ -1,2 +1,4 @@
 /target
-/roms
+/roms/*
+!/roms/README.md
+*.sav
