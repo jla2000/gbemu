@@ -475,8 +475,7 @@ pub(super) fn execute(cpu: &mut Cpu, bus: &mut impl Bus, opcode: u8) -> u8 {
             16
         }
         0xF8 => {
-            let off = cpu.fetch_byte(bus) as i8 as i16 as u16;
-            cpu.regs.sp = cpu.regs.sp.wrapping_add(off);
+            ld_hl_sp_i8(cpu, bus);
             12
         }
         0xF9 => {
@@ -715,6 +714,23 @@ fn add_sp_i8(cpu: &mut Cpu, bus: &mut impl Bus) {
     let half = (sp & 0x0F) + (off16 & 0x0F) > 0x0F;
     let carry = (sp & 0xFF) + (off16 & 0xFF) > 0xFF;
     cpu.regs.sp = r;
+    cpu.regs.set_flag(FLAG_Z, false);
+    cpu.regs.set_flag(FLAG_N, false);
+    cpu.regs.set_flag(FLAG_H, half);
+    cpu.regs.set_flag(FLAG_C, carry);
+}
+
+/// `LD HL,SP+e8` (0xF8): same offset-add flag semantics as `ADD SP,e8`
+/// (`add_sp_i8`), but the result lands in `HL` — `SP` itself is
+/// unaffected.
+fn ld_hl_sp_i8(cpu: &mut Cpu, bus: &mut impl Bus) {
+    let off = cpu.fetch_byte(bus) as i8;
+    let sp = cpu.regs.sp;
+    let off16 = off as i16 as u16;
+    let r = sp.wrapping_add(off16);
+    let half = (sp & 0x0F) + (off16 & 0x0F) > 0x0F;
+    let carry = (sp & 0xFF) + (off16 & 0xFF) > 0xFF;
+    cpu.regs.set_hl(r);
     cpu.regs.set_flag(FLAG_Z, false);
     cpu.regs.set_flag(FLAG_N, false);
     cpu.regs.set_flag(FLAG_H, half);

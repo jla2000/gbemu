@@ -216,33 +216,54 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
 - [x] BG + window + sprite fetch/render, tile addressing modes (8000/8800),
       OBJ-OBJ priority (X-coord + OAM index).
 - [x] Half-block video widget in `gb-tui`, truecolor palette.
-- [ ] Passes `dmg-acid2` and Mealybug Tearoom suite.
-- [ ] Blargg harness passes: `halt_bug`. Un-ignored (no longer needs
-      `LY`/VBlank polling); still unverified — no test ROM available in
-      this environment. Fetch `roms/blargg/halt_bug.gb` and run
-      `cargo test -p gbemu-blargg-tests halt_bug` to check this off.
+- [ ] Passes `dmg-acid2` and Mealybug Tearoom suite. ROMs not yet fetched
+      into this environment.
+- [ ] Blargg harness passes: `halt_bug`. Verified failing (ROM now present
+      in `roms/blargg/halt_bug.gb`) — not a hang/timeout, a real reported
+      failure; root cause not yet diagnosed (no bundled source for this
+      ROM to cross-reference).
 
 ### M3 — Cartridges
 - [x] ROM header parsing + validation warnings.
 - [x] MBC0, MBC1 (+ banking mode quirk), MBC2 (nibble RAM), MBC3 (+RTC
       latch), MBC5.
 - [x] Battery-backed `.sav` load/persist (write on exit + dirty interval).
-- [ ] Blargg harness passes: `cpu_instrs`, `mem_timing`, `mem_timing-2`.
-      Un-ignored (harness now loads through `System::load_cartridge`, real
-      MBC1 banking); still unverified — no test ROMs available in this
-      environment.
+- [x] Blargg harness passes: `cpu_instrs`. Was blocked on two real bugs,
+      both fixed: (1) `System::load_cartridge` never initialized CPU/PPU
+      registers to the DMG post-boot state, so the CPU started executing
+      from `PC=0x0000` with the LCD off instead of the cartridge's real
+      `0x0100` entry point — see `System::power_on_post_boot`; (2) opcode
+      `0xF8` (`LD HL,SP+e8`) was implemented as a duplicate of `0xE8`
+      (`ADD SP,e8` — mutating `SP` itself instead of writing the sum to
+      `HL`), which silently corrupted the stack whenever Blargg's shared
+      console routines used it, cascading into unrelated subtest failures.
+      Also needed the harness's `CYCLE_BUDGET` raised (the combined
+      multi-bank ROM legitimately takes ~50 emulated seconds, more than
+      the old 30s budget) and support for the `shell.s`-family ROMs'
+      cartridge-RAM result-reporting protocol (see `ram_report.rs`) for
+      the suites below that use it instead of the serial port.
+- [ ] Blargg harness passes: `mem_timing`, `mem_timing-2`. Verified
+      failing, root cause diagnosed: these test *which specific M-cycle
+      within an instruction* a memory access happens on (e.g. `LDH
+      A,(a8)`'s read should land on M-cycle 3 of 3), but `Cpu::step`
+      executes an instruction's bus reads/writes synchronously and only
+      bulk-advances the timer/PPU/etc. by the total elapsed cycles
+      afterward — there's no per-M-cycle interleaving for these tests to
+      observe. Fixing this for real needs a larger step-execution
+      refactor, not a targeted opcode fix.
 
 ### M4 — End-to-end playable
 - [x] Timer (DIV/TIMA/TMA/TAC) wired to interrupts — done in M1, pulled
       forward (see above).
 - [x] Joypad register + keyboard input mapping.
 - [x] OAM DMA + general DMA timing.
-- [ ] `oam_bug` Blargg test passes. Not expected to pass even once a ROM
-      is supplied: the actual OAM-corruption hardware quirk this ROM
-      exercises (certain 16-bit inc/dec/ldi/ldd opcodes corrupting OAM
-      when PC is 0xFE00-0xFEFF during Mode 2) isn't modeled — narrow
-      enough (real games don't rely on it) that it's being left as a
-      documented gap rather than implemented speculatively.
+- [ ] `oam_bug` Blargg test passes. Verified failing as expected (ROM now
+      present in `roms/blargg/oam_bug/oam_bug.gb`): the actual
+      OAM-corruption hardware quirk this ROM exercises (certain 16-bit
+      inc/dec/ldi/ldd opcodes corrupting OAM when PC is 0xFE00-0xFEFF
+      during Mode 2) isn't modeled — narrow enough (real games don't rely
+      on it) that it's being left as a documented gap rather than
+      implemented speculatively.
 - [ ] First playable commercial ROM, full framerate pacing. Framerate
       pacing is implemented (audio-buffer-backpressure pacing when an
       output device is available, wall-clock `run_frame()`-per-tick
@@ -258,12 +279,17 @@ ROM/RAM size codes, optional checksum validation (warn, don't refuse).
       wall-clock pacing when no output device is available — this
       sandbox's usual case, verified: `cpal`'s ALSA backend finds no real
       card here).
-- [ ] `dmg_sound` Blargg tests pass. Test file added; unverified — no ROM
-      available in this environment. A couple of specific subtests
-      (zombie-mode envelope glitch, sweep's second overflow check) aren't
-      expected to pass even with a ROM — documented gaps in
-      `gb_core::apu`'s module doc, narrow enough not to be worth chasing
-      without a way to verify against them.
+- [ ] `dmg_sound` Blargg tests pass. ROM now present
+      (`roms/blargg/dmg_sound/dmg_sound.gb`), but the run itself is broken:
+      it doesn't hit the cycle budget's exit path within any reasonable
+      wall-clock time (10+ minutes of real CPU time observed with no
+      result), unlike every other suite (all well under a few seconds for
+      a full 90-emulated-second budget). Not yet root-caused — likely
+      either a genuine infinite loop specific to this ROM's APU self-tests
+      or a performance problem in `Apu::step`/the mixer, not investigated
+      further here. A couple of specific subtests (zombie-mode envelope
+      glitch, sweep's second overflow check) aren't expected to pass even
+      once this is fixed — documented gaps in `gb_core::apu`'s module doc.
 
 ### M6 — Debugger
 - [x] Disassembly panel (live, centered on PC). "Centered" is approximated

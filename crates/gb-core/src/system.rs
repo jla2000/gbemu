@@ -45,8 +45,62 @@ impl System {
     /// Parses and installs `data` as a real cartridge (header, MBC,
     /// banking), replacing any previous cartridge or flat-loaded ROM.
     /// Returns non-fatal header-validation warnings.
+    ///
+    /// This emulator has no boot ROM, so it can't reach the cartridge's
+    /// entry point by actually executing one — instead this hands off
+    /// straight to the CPU/PPU/APU register state a real DMG boot ROM
+    /// leaves behind just before it jumps to `0x0100` (see
+    /// [`Self::power_on_post_boot`]). Without this, `cpu.regs.pc` and
+    /// `mmu.ppu`'s `LCDC` stay at their `Default` zero value: PC=0 (not
+    /// the cartridge's real entry point) and the LCD off — and since
+    /// `run_frame`/the TUI's frame loop refuse to step the CPU at all
+    /// while the LCD is off, the whole system would be permanently
+    /// frozen before a single instruction ran.
     pub fn load_cartridge(&mut self, data: &[u8]) -> Vec<String> {
-        self.mmu.load_cartridge(data)
+        let warnings = self.mmu.load_cartridge(data);
+        self.power_on_post_boot();
+        warnings
+    }
+
+    /// Sets CPU registers and PPU/APU I/O registers to their documented
+    /// DMG post-boot-ROM values (see
+    /// <https://gbdev.io/pandocs/Power_Up_Sequence.html>), standing in for
+    /// the boot ROM this emulator doesn't execute. APU registers are set
+    /// through their normal `write_*` methods (rather than by poking
+    /// fields directly) so the power-on gating in `Apu::write_nr52` runs
+    /// first, same as the real boot ROM's own register-write order.
+    fn power_on_post_boot(&mut self) {
+        self.cpu.regs.set_af(0x01B0);
+        self.cpu.regs.set_bc(0x0013);
+        self.cpu.regs.set_de(0x00D8);
+        self.cpu.regs.set_hl(0x014D);
+        self.cpu.regs.sp = 0xFFFE;
+        self.cpu.regs.pc = 0x0100;
+
+        self.mmu.ppu.write_lcdc(0x91);
+        self.mmu.ppu.write_bgp(0xFC);
+
+        self.mmu.apu.write_nr52(0x80); // power on first: other writes are gated on it
+        self.mmu.apu.write_nr10(0x80);
+        self.mmu.apu.write_nr11(0xBF);
+        self.mmu.apu.write_nr12(0xF3);
+        self.mmu.apu.write_nr13(0xFF);
+        self.mmu.apu.write_nr14(0xBF);
+        self.mmu.apu.write_nr21(0x3F);
+        self.mmu.apu.write_nr22(0x00);
+        self.mmu.apu.write_nr23(0xFF);
+        self.mmu.apu.write_nr24(0xBF);
+        self.mmu.apu.write_nr30(0x7F);
+        self.mmu.apu.write_nr31(0xFF);
+        self.mmu.apu.write_nr32(0x9F);
+        self.mmu.apu.write_nr33(0xFF);
+        self.mmu.apu.write_nr34(0xBF);
+        self.mmu.apu.write_nr41(0xFF);
+        self.mmu.apu.write_nr42(0x00);
+        self.mmu.apu.write_nr43(0x00);
+        self.mmu.apu.write_nr44(0xBF);
+        self.mmu.apu.write_nr50(0x77);
+        self.mmu.apu.write_nr51(0xF3);
     }
 
     /// Execute a single CPU instruction — including interrupt dispatch —

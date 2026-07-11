@@ -2,7 +2,12 @@
 //!
 //! Runs a `gb_core::System` against a Blargg test ROM until either:
 //! - the serial output (captured via the loopback stub in
-//!   `gb_core::serial`) contains a recognizable "Passed"/"Failed" marker, or
+//!   `gb_core::serial`) contains a recognizable "Passed"/"Failed" marker,
+//! - the ROM reports through cartridge RAM instead (see
+//!   [`ram_report::poll`]'s doc comment) — some Blargg suites (`oam_bug`,
+//!   `mem_timing-2`, `dmg_sound`, `halt_bug`) use this protocol instead of
+//!   the serial port, and spin in an infinite loop afterward by design (for
+//!   real hardware/devcart test rigs that read the result out of band), or
 //! - a generous cycle budget is exhausted (treated as a hang/failure).
 //!
 //! Test ROMs are not redistributed with this repo (see `../../roms/README`
@@ -16,12 +21,16 @@ use std::path::Path;
 
 use gb_core::System;
 
+mod ram_report;
+
 /// Generous upper bound on T-cycles for a single Blargg test ROM run
-/// before giving up and treating it as hung. Real hardware runs these in
-/// well under a second of emulated time; this is ~30 emulated seconds
-/// worth of DMG cycles (4.194304 MHz), comfortably more than any of the
-/// targeted suites take even including their self-test loops.
-pub const CYCLE_BUDGET: u64 = 4_194_304 * 30;
+/// before giving up and treating it as hung: ~90 emulated seconds worth of
+/// DMG cycles (4.194304 MHz). The multi-bank combined ROMs (`cpu_instrs.gb`
+/// and friends) run all of their subtests back to back, each with its own
+/// `delay_msec` pacing and console output — measured at ~50 emulated
+/// seconds for `cpu_instrs.gb` alone, so 30s (this constant's previous
+/// value) was too tight and produced false "hung" timeouts.
+pub const CYCLE_BUDGET: u64 = 4_194_304 * 90;
 
 /// Outcome of running a Blargg ROM to completion or budget exhaustion.
 #[derive(Debug)]
@@ -46,6 +55,7 @@ pub fn run_blargg_rom(rom_path: &Path) -> Outcome {
     let mut sys = System::new();
     sys.load_cartridge(&data);
 
+    let mut ram_report = ram_report::RamReport::default();
     let mut cycles: u64 = 0;
     while cycles < CYCLE_BUDGET {
         cycles += sys.step() as u64;
@@ -56,6 +66,10 @@ pub fn run_blargg_rom(rom_path: &Path) -> Outcome {
         }
         if so_far.contains("Failed") {
             return Outcome::Failed(so_far);
+        }
+
+        if let Some(outcome) = ram_report.poll(&mut sys) {
+            return outcome;
         }
     }
     Outcome::TimedOut(sys.mmu.serial.output_so_far())
