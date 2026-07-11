@@ -57,9 +57,7 @@ cargo test -p gbemu-dmg-acid2-test -- --nocapture
 ## Status as of this environment
 
 Blargg's ROMs, `dmg-acid2`, and the Mealybug ROMs are all present in this
-environment as of the M2/M3 pass that verified them (see `SPEC.md`) —
-fetched directly from GitHub, which this sandbox does in fact have
-network access to (an earlier version of this note claimed otherwise;
-that was never re-checked until then). `cargo test --workspace` picks
-them up automatically; `roms/` stays gitignored regardless, so a fresh
-checkout still needs this directory populated by hand.
+environment as of the M2/M3 pass that verified them (see `SPEC.md`).
+`cargo test --workspace` picks them up automatically; `roms/` stays
+gitignored regardless, so a fresh checkout still needs this directory
+populated by hand.
