@@ -228,7 +228,7 @@ mod tests {
     /// line) runs without panicking against a real ratatui `Buffer`.
     #[test]
     fn full_render_pipeline_does_not_panic_across_all_debug_panels() {
-        let backend = TestBackend::new(200, 100);
+        let backend = TestBackend::new(260, 100);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = App::new(None, Palette::Classic);
         app.system.load_rom(&[0x00]);
@@ -238,7 +238,6 @@ mod tests {
         app.debug_overlay = true;
         for panel in [
             app::DebugPanel::Disassembly,
-            app::DebugPanel::Registers,
             app::DebugPanel::Memory,
             app::DebugPanel::Vram,
             app::DebugPanel::Log,

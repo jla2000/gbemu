@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use gb_core::cpu::Registers;
 use gb_core::joypad::Button;
 use gb_core::System;
 
@@ -23,19 +24,19 @@ pub enum RunMode {
 }
 
 /// Which debug panel `Tab` currently has focused, when the debug overlay
-/// is visible.
+/// is visible. `Registers` was retired in M8: that content now renders
+/// unconditionally in the status sidebar (`debug::status`) instead of
+/// living behind a togglable panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugPanel {
     Disassembly,
-    Registers,
     Memory,
     Vram,
     Log,
 }
 
-const DEBUG_PANELS: [DebugPanel; 5] = [
+const DEBUG_PANELS: [DebugPanel; 4] = [
     DebugPanel::Disassembly,
-    DebugPanel::Registers,
     DebugPanel::Memory,
     DebugPanel::Vram,
     DebugPanel::Log,
@@ -67,6 +68,10 @@ pub struct App {
     /// Cursor/jump-to-address for the memory viewer panel.
     pub mem_viewer_addr: u16,
     pub breakpoints: Breakpoints,
+    /// The previous frame's CPU register snapshot, used by the status
+    /// sidebar to highlight whichever registers changed since the last
+    /// redraw (see `debug::status::cpu_lines`).
+    pub prev_cpu_regs: Registers,
 }
 
 impl App {
@@ -83,6 +88,7 @@ impl App {
             vram_tab: VramTab::Tiles,
             mem_viewer_addr: 0,
             breakpoints: Breakpoints::new(),
+            prev_cpu_regs: Registers::new(),
         }
     }
 
@@ -143,7 +149,6 @@ mod tests {
         let mut app = App::new(None, Palette::Classic);
         assert_eq!(app.debug_panel, DebugPanel::Disassembly);
         for expected in [
-            DebugPanel::Registers,
             DebugPanel::Memory,
             DebugPanel::Vram,
             DebugPanel::Log,

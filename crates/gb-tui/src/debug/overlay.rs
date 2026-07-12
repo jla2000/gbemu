@@ -12,7 +12,7 @@ use gb_core::mmu::Mmu;
 
 use crate::app::{App, DebugPanel, VramTab};
 use crate::debug::breakpoints::Breakpoints;
-use crate::debug::{disasm, log_panel, memory, registers, vram};
+use crate::debug::{disasm, log_panel, memory, vram};
 
 /// Disassembles `count` instructions starting at `pc`, marking the first
 /// (the CPU's current instruction) with `->` and any address with a
@@ -59,9 +59,6 @@ impl<'a> Widget for DebugOverlayWidget<'a> {
                         .collect();
                 Paragraph::new(text).block(block).render(area, buf);
             }
-            DebugPanel::Registers => {
-                registers::RegistersWidget::new(&self.app.system.cpu).render(area, buf);
-            }
             DebugPanel::Memory => {
                 memory::MemoryWidget::new(
                     &mut self.app.system.mmu,
@@ -96,27 +93,10 @@ impl<'a> Widget for DebugOverlayWidget<'a> {
     }
 }
 
-/// One-line summary shown regardless of which panel is focused: run
-/// state and active breakpoints, so they're visible without switching
-/// panels.
-pub fn status_summary(app: &App) -> String {
-    let run_state = match app.run_mode {
-        crate::app::RunMode::Running => "RUNNING",
-        crate::app::RunMode::Paused => "PAUSED",
-    };
-    let bp_count = app.breakpoints.pc_breakpoints().count();
-    let watch_count = app.breakpoints.watchpoints().count();
-    format!(
-        "[{run_state}] breakpoints:{bp_count} watchpoints:{watch_count} | Tab: panel  Space: step  F: frame  F5: run/pause  B: breakpoint@PC  W: watch"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use gb_core::System;
-
-    use crate::palette::Palette;
 
     #[test]
     fn disassembly_lines_walks_forward_and_marks_pc() {
@@ -140,14 +120,5 @@ mod tests {
         let lines = disassembly_lines(&mut sys.mmu, 0, 2, &breakpoints);
         assert!(!lines[0].contains('*'));
         assert!(lines[1].contains('*'));
-    }
-
-    #[test]
-    fn status_summary_reports_run_mode_and_breakpoint_counts() {
-        let mut app = App::new(None, Palette::Classic);
-        app.breakpoints.toggle_pc(0x100);
-        let summary = status_summary(&app);
-        assert!(summary.contains("PAUSED"));
-        assert!(summary.contains("breakpoints:1"));
     }
 }

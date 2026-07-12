@@ -362,7 +362,7 @@ some visual polish beyond plain hex dumps — decoded flags, color-coding,
 change highlighting — since "interesting" was explicitly asked for, not
 just "more."
 
-- [ ] New always-on `StatusSidebarWidget` (new module, e.g.
+- [x] New always-on `StatusSidebarWidget` (new module, e.g.
       `gb-tui/src/debug/status.rs`), rendered unconditionally beside the
       video area regardless of `App::debug_overlay`. Sections, all backed
       by data already exposed publicly (no `gb-core` changes needed for
@@ -384,40 +384,42 @@ just "more."
         moved up from the status line (today's
         `debug::overlay::status_summary`) into the sidebar header so
         it's grouped with the rest of the always-on info.
-- [ ] Layout rework in `render/layout.rs`: video (160x72) + sidebar
-      (~32-34 cols, exact width TBD once section content is drafted)
-      share the top row unconditionally. The existing F12-toggled
-      `DebugOverlayWidget` (disassembly/memory/vram/log, still
-      Tab-cycled) moves from *beside* the video to a full-width panel
-      *below* it, shown only when `debug_overlay` is on — avoids
-      requiring an even-wider terminal just to toggle it.
-      `layout::MIN_COLS` becomes `SCREEN_COLS + SIDEBAR_COLS` (sidebar
-      space is unconditional now, not gated on `debug_overlay`);
-      `MIN_ROWS` unchanged when the overlay is off, grows when it's on
-      (same idea as today's horizontal split, just reoriented to
-      vertical).
-- [ ] Retire the standalone `DebugPanel::Registers` tab (superseded by
-      the sidebar) from `App`'s panel-cycling; `debug::registers` module
-      content moves into the sidebar rather than staying duplicated in
-      both places.
-- [ ] Decode `LCDC`/`STAT` into readable flags alongside the raw hex
+- [x] Layout rework in `render/layout.rs`: video (160x72) + sidebar
+      (64 cols — wider than the originally-suggested ~32-34, since the
+      decoded LCDC line alone runs ~60 columns) share the top row
+      unconditionally. The existing F12-toggled `DebugOverlayWidget`
+      (disassembly/memory/vram/log, still Tab-cycled) moves from *beside*
+      the video to a full-width panel *below* it, shown only when
+      `debug_overlay` is on — avoids requiring an even-wider terminal
+      just to toggle it. `layout::MIN_COLS` is now `SCREEN_COLS +
+      SIDEBAR_COLS` (sidebar space is unconditional now, not gated on
+      `debug_overlay`); `MIN_ROWS` unchanged when the overlay is off,
+      grows by `MIN_OVERLAY_ROWS` when it's on (same idea as the old
+      horizontal split, just reoriented to vertical).
+- [x] Retired the standalone `DebugPanel::Registers` tab (superseded by
+      the sidebar) from `App`'s panel-cycling; the old `debug::registers`
+      module's content moved into the sidebar (`debug::status::cpu_lines`)
+      rather than staying duplicated in both places, and the module
+      itself was deleted.
+- [x] Decode `LCDC`/`STAT` into readable flags alongside the raw hex
       (e.g. `LCDC F3  LCD:ON BG:ON WIN:OFF OBJ:ON(8x8) MAP:9800
       TILE:8000`), rather than just the raw byte value — same spirit as
       today's `AF: 1234 (A:12 F:34)` register-pair decoding.
-- [ ] Color-code sidebar section titles/borders by category (CPU/PPU/
+- [x] Color-code sidebar section titles/borders by category (CPU/PPU/
       Timer/Cartridge/APU each a distinct, consistent color) so it reads
       at a glance instead of as a wall of undifferentiated hex.
-- [ ] Changed-value highlighting: `App` keeps the previous frame's CPU
+- [x] Changed-value highlighting: `App` keeps the previous frame's CPU
       register snapshot; the sidebar renders any register that changed
       since the last redraw in a highlight color for that frame, making
       execution activity visible without single-stepping.
-- [ ] Update tests that assumed the old layout/panel set: `render::
-      layout`'s resize-prompt test (new `MIN_COLS`), `main.rs`'s
-      full-render-pipeline smoke test (drop `DebugPanel::Registers` from
-      the panels it iterates, add a sidebar render pass), `debug::
-      overlay`'s `status_summary` test (move/rename if its output moves
-      into the sidebar). Update `SPEC.md`'s "Debug UI" section and
-      affected module doc comments to match.
+- [x] Update tests that assumed the old layout/panel set: `render::
+      layout`'s resize-prompt tests (new `MIN_COLS`/`MIN_ROWS_WITH_OVERLAY`),
+      `main.rs`'s full-render-pipeline smoke test (drop
+      `DebugPanel::Registers` from the panels it iterates — the sidebar
+      render pass happens on every draw already), `debug::overlay`'s
+      `status_summary` test (removed; its content moved into
+      `debug::status::run_state_line`, covered there). `SPEC.md`'s
+      "Debug UI" section already described this end state.
 - [ ] Stretch, deferred unless time allows — both need small new
       `gb-core` accessors, not exposed today: a live MBC bank indicator
       (current ROM/RAM bank in use; each MBC's bank-select state is
