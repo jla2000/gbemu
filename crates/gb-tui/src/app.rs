@@ -59,8 +59,16 @@ pub struct App {
     /// When each currently-held button was last confirmed pressed —
     /// `input::handle_events` auto-releases a button once its entry goes
     /// stale, since most terminals never send a discrete key-release
-    /// event. See that module for the timeout.
+    /// event. See that module for the timeout. Unused when
+    /// `enhanced_keyboard` is set: real release events are trusted
+    /// instead.
     pub button_last_pressed: HashMap<Button, Instant>,
+    /// Whether the terminal negotiated the Kitty keyboard protocol's
+    /// event-type reporting extension (set once at startup from
+    /// `main::init_terminal`'s probe). When true, `input::handle_events`
+    /// trusts real press/release events instead of the staleness-timeout
+    /// heuristic `button_last_pressed` exists for.
+    pub enhanced_keyboard: bool,
 
     pub debug_overlay: bool,
     pub debug_panel: DebugPanel,
@@ -83,6 +91,7 @@ impl App {
             palette,
             should_quit: false,
             button_last_pressed: HashMap::new(),
+            enhanced_keyboard: false,
             debug_overlay: false,
             debug_panel: DebugPanel::Disassembly,
             vram_tab: VramTab::Tiles,

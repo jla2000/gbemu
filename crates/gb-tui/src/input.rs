@@ -17,13 +17,18 @@ use gb_core::joypad::Button;
 use crate::app::{App, RunMode};
 
 /// If a button hasn't seen a fresh press within this window, treat it as
-/// released. Most terminals only ever report key-*press* events (even
-/// OS-level auto-repeat while held arrives as repeated presses, not a
-/// press/hold/release triple), so this is the practical way to detect
-/// "released" without the Kitty keyboard protocol's release events. Long
-/// enough that a held key's repeat cadence doesn't cause flicker, short
-/// enough that letting go reads as an prompt release.
-const AUTO_RELEASE_TIMEOUT: Duration = Duration::from_millis(150);
+/// released. Only used as a fallback on terminals that don't support the
+/// Kitty keyboard protocol's real release events (`App::enhanced_keyboard`
+/// unset) -- such terminals only ever report key-*press* events, and
+/// OS-level auto-repeat while a key is held arrives as repeated presses at
+/// the OS's repeat *cadence*, not starting immediately: there's a longer
+/// initial delay (commonly 400-700ms, OS/terminal-configurable) between the
+/// first press and the first repeat. This timeout has to bridge that gap,
+/// not just the steady-state cadence between repeats -- a shorter value
+/// (150ms was tried first) reads a still-held key as released during that
+/// initial gap, then pressed again once repeats start, producing a
+/// spurious short-tap-then-long-press blip instead of one continuous hold.
+const AUTO_RELEASE_TIMEOUT: Duration = Duration::from_millis(700);
 
 fn map_key(code: KeyCode) -> Option<Button> {
     match code {
@@ -43,8 +48,9 @@ fn map_key(code: KeyCode) -> Option<Button> {
     }
 }
 
-/// Drains all pending terminal events (non-blocking), then auto-releases
-/// any button that's gone stale. Updates `app` in place.
+/// Drains all pending terminal events (non-blocking), then -- on
+/// terminals without real key-release events -- auto-releases any button
+/// that's gone stale. Updates `app` in place.
 pub fn handle_events(app: &mut App) -> Result<()> {
     while event::poll(Duration::ZERO)? {
         if let Event::Key(key) = event::read()? {
@@ -132,7 +138,17 @@ fn handle_debug_key(app: &mut App, code: KeyCode) {
     }
 }
 
+/// No-op on terminals speaking the Kitty protocol's event-type extension
+/// (`App::enhanced_keyboard`): those send a real `KeyEventKind::Release`
+/// the instant a key physically comes up, which `handle_key` already acts
+/// on directly, so there's nothing stale to sweep. Without it, a
+/// still-held key can go quiet for a while between OS auto-repeat
+/// presses, so staleness is the only signal available.
 fn release_stale_buttons(app: &mut App) {
+    if app.enhanced_keyboard {
+        return;
+    }
+
     let now = Instant::now();
     let stale: Vec<Button> = app
         .button_last_pressed
@@ -143,5 +159,69 @@ fn release_stale_buttons(app: &mut App) {
     for button in stale {
         app.system.mmu.joypad.set_button(button, false);
         app.button_last_pressed.remove(&button);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::app::App;
+    use crate::palette::Palette;
+
+    #[test]
+    fn enhanced_keyboard_trusts_a_real_release_event_immediately() {
+        let mut app = App::new(None, Palette::Classic);
+        app.enhanced_keyboard = true;
+
+        handle_key(&mut app, KeyCode::Up, KeyEventKind::Press, event::KeyModifiers::NONE);
+        assert!(app.button_last_pressed.contains_key(&Button::Up));
+
+        handle_key(&mut app, KeyCode::Up, KeyEventKind::Release, event::KeyModifiers::NONE);
+        assert!(!app.button_last_pressed.contains_key(&Button::Up));
+    }
+
+    #[test]
+    fn enhanced_keyboard_ignores_staleness_even_past_the_timeout() {
+        // Regression test: with real release events available, a gap
+        // between OS auto-repeat presses (e.g. the OS's initial
+        // repeat-delay, commonly longer than AUTO_RELEASE_TIMEOUT) must
+        // not read as a release -- only an explicit Release event should.
+        let mut app = App::new(None, Palette::Classic);
+        app.enhanced_keyboard = true;
+
+        handle_key(&mut app, KeyCode::Up, KeyEventKind::Press, event::KeyModifiers::NONE);
+        // Backdate the press past the fallback timeout to simulate a long
+        // gap before the next OS auto-repeat event arrives.
+        app.button_last_pressed
+            .insert(Button::Up, Instant::now() - AUTO_RELEASE_TIMEOUT * 2);
+
+        release_stale_buttons(&mut app);
+
+        assert!(app.button_last_pressed.contains_key(&Button::Up));
+    }
+
+    #[test]
+    fn plain_terminal_releases_a_button_once_it_goes_stale() {
+        let mut app = App::new(None, Palette::Classic);
+        assert!(!app.enhanced_keyboard);
+
+        handle_key(&mut app, KeyCode::Up, KeyEventKind::Press, event::KeyModifiers::NONE);
+        app.button_last_pressed
+            .insert(Button::Up, Instant::now() - AUTO_RELEASE_TIMEOUT * 2);
+
+        release_stale_buttons(&mut app);
+
+        assert!(!app.button_last_pressed.contains_key(&Button::Up));
+    }
+
+    #[test]
+    fn plain_terminal_keeps_a_freshly_pressed_button_held() {
+        let mut app = App::new(None, Palette::Classic);
+        handle_key(&mut app, KeyCode::Up, KeyEventKind::Press, event::KeyModifiers::NONE);
+
+        release_stale_buttons(&mut app);
+
+        assert!(app.button_last_pressed.contains_key(&Button::Up));
     }
 }

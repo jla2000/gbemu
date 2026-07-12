@@ -60,7 +60,7 @@ fn main() -> Result<()> {
     }
 
     let (mut terminal, enhanced_keyboard) = init_terminal()?;
-    let result = run(&mut terminal, cli.rom, cli.palette);
+    let result = run(&mut terminal, cli.rom, cli.palette, enhanced_keyboard);
     restore_terminal(&mut terminal, enhanced_keyboard)?;
     result
 }
@@ -133,8 +133,10 @@ fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     rom: Option<PathBuf>,
     palette: Palette,
+    enhanced_keyboard: bool,
 ) -> Result<()> {
     let mut app = App::new(rom.clone(), palette);
+    app.enhanced_keyboard = enhanced_keyboard;
 
     if let Some(rom_path) = &rom {
         match std::fs::read(rom_path) {
